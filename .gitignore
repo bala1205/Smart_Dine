@@ -81,3 +81,7 @@ functions/node_modules/
 # Build outputs already covered but explicit
 dist/
 build/
+
+# Vercel
+.vercel
+.vercel/
