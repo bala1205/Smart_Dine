@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1025367454078",
+    "project_id": "smart-dine-befb9",
+    "storage_bucket": "smart-dine-befb9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1025367454078:android:eb42520f02202b011a432f",
+        "android_client_info": {
+          "package_name": "com.example.smartdine"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBzrkEYNgzQlxReeNIjRCOpDPPDvoGGLWI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

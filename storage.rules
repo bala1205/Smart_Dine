@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Restaurant images (logo + menu) are public so customers can load the menu.
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isRestaurantOwner(restaurantId) {
+      return isAuth()
+        && firestore.get(/databases/(default)/documents/restaurants/$(restaurantId)).data.ownerId == request.auth.uid;
+    }
+
+    // Public read for restaurant media.
+    match /restaurants/{restaurantId}/{category}/{file} {
+      allow read: if true;
+
+      // Only the owner of this restaurant may upload logo/menu images.
+      allow write: if isRestaurantOwner(restaurantId)
+        && request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Everything else is denied by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

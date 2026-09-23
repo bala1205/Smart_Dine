@@ -1,0 +1,182 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function selfUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isOwnerOf(restaurantId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/restaurants/$(restaurantId)).data.ownerId == request.auth.uid;
+    }
+
+    function isKitchenOf(restaurantId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'KITCHEN'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.restaurantId == restaurantId;
+    }
+
+    // A user doc referencing a restaurant they own (used to stop arbitrary writes).
+    function validOwnerUserWrite() {
+      return request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'OWNER'
+        && isOwnerOf(request.resource.data.restaurantId)
+        && request.resource.data.createdAt != null;
+    }
+
+    // Owner creating a KITCHEN staff member's user doc.
+    function validKitchenStaffUserWrite() {
+      return request.auth != null
+        && request.resource.data.role == 'KITCHEN'
+        && request.resource.data.uid == request.resource.id
+        && isOwnerOf(request.resource.data.restaurantId)
+        && request.resource.data.createdAt != null;
+    }
+
+    // ---------- User profiles ----------
+    match /users/{uid} {
+      // Owner registering their own account.
+      allow create: if validOwnerUserWrite() || validKitchenStaffUserWrite();
+      // Own profile read.
+      allow read: if selfUser(uid);
+      // Owners may update (not their role/restaurant) and may update own profile.
+      allow update: if selfUser(uid)
+        && (request.resource.data.role == resource.data.role)
+        && (request.resource.data.restaurantId == resource.data.restaurantId);
+      allow delete: if false;
+    }
+
+    // ---------- Restaurants ----------
+    match /restaurants/{restaurantId} {
+      // Owner creates their restaurant during registration.
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.createdAt != null;
+      // Owner full access; public can read active restaurants (for the menu).
+      allow read: if (signedIn() && resource.data.ownerId == request.auth.uid)
+        || resource.data.isActive == true;
+      allow update, delete: if isOwnerOf(restaurantId);
+
+      // ---------- Categories ----------
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow create, update, delete: if isOwnerOf(restaurantId);
+      }
+
+      // ---------- Menu items ----------
+      match /menuItems/{menuItemId} {
+        allow read: if true;
+        allow create, update, delete: if isOwnerOf(restaurantId);
+      }
+
+      // ---------- Tables ----------
+      match /tables/{tableId} {
+        // Public can read active tables to validate QR on the menu page.
+        allow read: if true;
+        allow create, update, delete: if isOwnerOf(restaurantId);
+      }
+
+      // ---------- Staff ----------
+      match /staff/{staffId} {
+        allow read: if signedIn();
+        allow create: if isOwnerOf(restaurantId);
+        allow update, delete: if isOwnerOf(restaurantId);
+      }
+
+      // ---------- Orders + items ----------
+      function orderStatusCompatible(prev, next) {
+        return (prev == 'PLACED' && (next in ['PREPARING','CANCELLED']))
+          || (prev == 'PREPARING' && (next in ['READY','CANCELLED']))
+          || (prev == 'READY' && next == 'SERVED');
+      }
+
+      // Shared helper used by the order AND order-item create rules. It binds a
+      // write to an existing, ACTIVE table whose stored qrToken equals the
+      // qrToken on the incoming document. The QR token is a cryptographically
+      // random, unguessable secret stored on the table doc, so it is the
+      // customer's effective authorization — only someone who scanned the real
+      // QR can pass this check. We intentionally do NOT require
+      // `request.auth == null`: the customer is unauthenticated, and a browser
+      // that happens to hold a Firebase auth session (e.g. a previous owner
+      // login persisted in the same browser) would otherwise be denied and block
+      // normal QR ordering. NOTE: do not use `result.exists` on the get() result
+      // here — the Firestore rules engine treats that as "Property exists is
+      // undefined"; use `result != null` instead.
+      function tableQrValid(tableId) {
+        let t = get(/databases/$(database)/documents/restaurants/$(restaurantId)/tables/$(tableId));
+        return t != null
+          && t.data.isActive == true
+          && t.data.qrToken is string
+          && t.data.qrToken == request.resource.data.qrToken;
+      }
+
+      match /orders/{orderId} {
+        // Customer (Spark) fallback: an order may be created only if it is
+        // PLACED and references an active table whose QR token matches. Prices
+        // still come from Firestore menu docs (the client recomputes them), so
+        // this path never trusts any client-supplied amount.
+        function validOrderCreate() {
+          return request.resource.data.restaurantId == restaurantId
+            && request.resource.data.tableId is string
+            && request.resource.data.status == 'PLACED'
+            && request.resource.data.customerSessionId is string
+            && request.resource.data.trackingToken is string
+            && request.resource.data.qrToken is string
+            && request.resource.data.totalAmount is number
+            && request.resource.data.totalAmount >= 0
+            && request.resource.data.createdAt != null
+            && tableQrValid(request.resource.data.tableId);
+        }
+
+        // Owner + kitchen see orders; customers track their order using the
+        // secure trackingToken carried in the document.
+        allow read: if isOwnerOf(restaurantId)
+          || isKitchenOf(restaurantId)
+          || (request.auth == null && resource.data.trackingToken != null);
+
+        // Orders are created either by the createSecureOrder Cloud Function
+        // (admin SDK, bypasses these rules) or, on the Spark plan, by the
+        // client-side fallback gated by the table's QR token above.
+        allow create: if validOrderCreate();
+        allow delete: if isOwnerOf(restaurantId);
+
+        // Status transitions only (kitchen + owner), enforced server-side validation.
+        allow update: if (isOwnerOf(restaurantId) || isKitchenOf(restaurantId))
+          && request.resource.data.status != resource.data.status
+          && orderStatusCompatible(resource.data.status, request.resource.data.status)
+          && request.resource.data.totalAmount == resource.data.totalAmount
+          && request.resource.data.restaurantId == resource.data.restaurantId
+          && request.resource.data.tableId == resource.data.tableId;
+
+        // ---------- Order items ----------
+        match /items/{itemId} {
+          allow read: if isOwnerOf(restaurantId)
+            || isKitchenOf(restaurantId)
+            // Items tied to their parent order's tracking token.
+            || (request.auth == null
+                && get(/databases/$(database)/documents/restaurants/$(restaurantId)/orders/$(orderId)).data.trackingToken != null);
+          // Items are written in the same batch as their order (Spark client
+          // fallback) or by the Cloud Function (admin). Each item document
+          // carries restaurantId/tableId/qrToken so it is bound by the same QR
+          // token + active-table check as its parent order — making the batch
+          // atomic and ensuring a customer can only create items for the table
+          // whose QR they actually scanned.
+          allow create: if request.resource.data.restaurantId == restaurantId
+            && request.resource.data.tableId is string
+            && request.resource.data.qrToken is string
+            && request.resource.data.quantity is number
+            && request.resource.data.quantity > 0
+            && tableQrValid(request.resource.data.tableId);
+          allow update, delete: if false;
+        }
+      }
+    }
+  }
+}

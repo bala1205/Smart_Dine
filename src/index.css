@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Hide scrollbar for horizontal nav but keep scroll */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* === PORTRAIT-ONLY SAFE-AREA FIXES (do NOT affect desktop or landscape) === */
+@media (max-width: 767px) and (orientation: portrait) {
+  /* OwnerLayout: safe-area + correct offset for fixed header */
+  .owner-header {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .owner-main {
+    /* Header is ~96px tall + safe-area. Override Tailwind mt-14 (56px) */
+    margin-top: calc(96px + env(safe-area-inset-top, 0px)) !important;
+  }
+  .owner-nav {
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .owner-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .owner-nav a {
+    scroll-snap-align: start;
+  }
+
+  /* KitchenLayout: sticky header safe-area */
+  .kitchen-header {
+    padding-top: env(safe-area-inset-top, 0px);
+    top: 0;
+  }
+}
