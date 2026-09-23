@@ -1,0 +1,29 @@
+# Flutter / native - not needed for Vercel Vite deployment
+.dart_tool
+.flutter-plugins-dependencies
+.pub-cache
+.pub
+/build
+/android
+/ios
+/linux
+/macos
+/windows
+/lib
+/test
+/web
+/coverage
+.firebase
+firestore-debug.log
+ui-debug.log
+firebase-debug.log
+/functions
+.idea
+*.iml
+*.log
+
+# Also ignore dist source (Vercel will build fresh)
+dist
+
+# Keep Vercel config but ignore its cache
+.vercel
