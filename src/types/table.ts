@@ -4,6 +4,7 @@ export interface Table {
   capacity: number;
   qrToken: string;
   isActive: boolean;
+  isAccessAvailable?: boolean;
   createdAt: number;
   updatedAt: number;
 }

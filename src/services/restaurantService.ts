@@ -39,6 +39,8 @@ export async function createRestaurantAndProfile(data: {
     address: "",
     ownerId: uid,
     isActive: true,
+    gstPercent: 0,
+    serviceChargePercent: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -105,6 +107,8 @@ export async function createOwnerSetup(data: {
       address: "",
       ownerId: data.uid,
       isActive: true,
+      gstPercent: 0,
+      serviceChargePercent: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

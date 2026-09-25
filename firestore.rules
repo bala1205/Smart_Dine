@@ -22,6 +22,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.restaurantId == restaurantId;
     }
 
+    function isWaiterOf(restaurantId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'WAITER'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.restaurantId == restaurantId;
+    }
+
+    function isStaffOf(restaurantId) {
+      return isKitchenOf(restaurantId) || isWaiterOf(restaurantId);
+    }
+
     // A user doc referencing a restaurant they own (used to stop arbitrary writes).
     function validOwnerUserWrite() {
       return request.auth != null
@@ -40,10 +50,18 @@ service cloud.firestore {
         && request.resource.data.createdAt != null;
     }
 
+    function validWaiterStaffUserWrite() {
+      return request.auth != null
+        && request.resource.data.role == 'WAITER'
+        && request.resource.data.uid == request.resource.id
+        && isOwnerOf(request.resource.data.restaurantId)
+        && request.resource.data.createdAt != null;
+    }
+
     // ---------- User profiles ----------
     match /users/{uid} {
       // Owner registering their own account.
-      allow create: if validOwnerUserWrite() || validKitchenStaffUserWrite();
+      allow create: if validOwnerUserWrite() || validKitchenStaffUserWrite() || validWaiterStaffUserWrite();
       // Own profile read.
       allow read: if selfUser(uid);
       // Owners may update (not their role/restaurant) and may update own profile.
@@ -59,9 +77,10 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.createdAt != null;
-      // Owner full access; public can read active restaurants (for the menu).
-      allow read: if (signedIn() && resource.data.ownerId == request.auth.uid)
-        || resource.data.isActive == true;
+      // Owner full access; public can read restaurants (for the menu & closed state).
+      // Inactive restaurants still need to be readable so the QR flow can show "Restaurant Closed"
+      // rather than a permission error / infinite loader.
+      allow read: if true;
       allow update, delete: if isOwnerOf(restaurantId);
 
       // ---------- Categories ----------
@@ -74,6 +93,18 @@ service cloud.firestore {
       match /menuItems/{menuItemId} {
         allow read: if true;
         allow create, update, delete: if isOwnerOf(restaurantId);
+        // Spark-compatible stock decrement by customer during order creation.
+        // Supports both trackStock and stockEnabled (alias) for compatibility.
+        allow update: if (
+          (resource.data.trackStock == true || resource.data.stockEnabled == true)
+          && request.resource.data.stockQuantity is number
+          && request.resource.data.stockQuantity < resource.data.stockQuantity
+          && request.resource.data.stockQuantity >= 0
+          && request.resource.data.name == resource.data.name
+          && request.resource.data.price == resource.data.price
+          && request.resource.data.categoryId == resource.data.categoryId
+          && (request.resource.data.isAvailable == resource.data.isAvailable || request.resource.data.isAvailable == false)
+        );
       }
 
       // ---------- Tables ----------
@@ -88,6 +119,50 @@ service cloud.firestore {
         allow read: if signedIn();
         allow create: if isOwnerOf(restaurantId);
         allow update, delete: if isOwnerOf(restaurantId);
+      }
+
+      // ---------- Service Requests (Waiter Calls) ----------
+      function validServiceRequestCreate() {
+        return request.resource.data.restaurantId == restaurantId
+          && request.resource.data.tableId is string
+          && request.resource.data.tableNumber is number
+          && (request.resource.data.requestType in ['CALL_WAITER','REQUEST_WATER','REQUEST_BILL','NEED_ASSISTANCE'] || request.resource.data.type in ['CALL_WAITER','REQUEST_WATER','REQUEST_BILL','NEED_ASSISTANCE'])
+          && request.resource.data.status == 'PENDING'
+          && request.resource.data.customerSessionId is string
+          && request.resource.data.createdAt != null
+          && request.resource.data.updatedAt != null
+          && get(/databases/$(database)/documents/restaurants/$(restaurantId)/tables/$(request.resource.data.tableId)).data.isActive == true;
+      }
+
+      function serviceRequestStatusCompatible(prev, next) {
+        return (prev == 'PENDING' && (next in ['ACKNOWLEDGED','COMPLETED','RESOLVED','CANCELLED']))
+          || (prev == 'ACKNOWLEDGED' && (next in ['COMPLETED','RESOLVED','CANCELLED']));
+      }
+
+      match /serviceRequests/{requestId} {
+        // Customers (unauthenticated) can create requests for active tables; owners/waiters/kitchen can also create
+        allow create: if validServiceRequestCreate();
+        // Staff/owner can get/list any request for their restaurant
+        allow get: if isOwnerOf(restaurantId) || isWaiterOf(restaurantId) || isKitchenOf(restaurantId);
+        allow list: if isOwnerOf(restaurantId) || isWaiterOf(restaurantId) || isKitchenOf(restaurantId)
+          // Customer (unauth) can only LIST where they filter by their own session + table (subscribeToCustomerRequests)
+          // This prevents enumeration via get by ID or unfiltered list.
+          || (request.auth == null
+              && request.query.limit <= 20
+              && request.query.where["customerSessionId"] != null
+              && request.query.where["tableId"] != null);
+        // Waiter/Owner can transition status; customers can cancel own PENDING
+        allow update: if ( (isOwnerOf(restaurantId) || isWaiterOf(restaurantId))
+          && serviceRequestStatusCompatible(resource.data.status, request.resource.data.status)
+          && request.resource.data.restaurantId == resource.data.restaurantId
+          && request.resource.data.tableId == resource.data.tableId
+        ) || (
+          resource.data.status == 'PENDING'
+          && request.resource.data.status == 'CANCELLED'
+          && request.resource.data.customerSessionId == resource.data.customerSessionId
+          && request.resource.data.restaurantId == resource.data.restaurantId
+        );
+        allow delete: if isOwnerOf(restaurantId);
       }
 
       // ---------- Orders + items ----------
@@ -113,6 +188,7 @@ service cloud.firestore {
         let t = get(/databases/$(database)/documents/restaurants/$(restaurantId)/tables/$(tableId));
         return t != null
           && t.data.isActive == true
+          && t.data.isAccessAvailable != false
           && t.data.qrToken is string
           && t.data.qrToken == request.resource.data.qrToken;
       }
@@ -135,10 +211,11 @@ service cloud.firestore {
             && tableQrValid(request.resource.data.tableId);
         }
 
-        // Owner + kitchen see orders; customers track their order using the
+        // Owner, kitchen, waiter see orders; customers track their order using the
         // secure trackingToken carried in the document.
         allow read: if isOwnerOf(restaurantId)
           || isKitchenOf(restaurantId)
+          || isWaiterOf(restaurantId)
           || (request.auth == null && resource.data.trackingToken != null);
 
         // Orders are created either by the createSecureOrder Cloud Function
@@ -147,18 +224,28 @@ service cloud.firestore {
         allow create: if validOrderCreate();
         allow delete: if isOwnerOf(restaurantId);
 
-        // Status transitions only (kitchen + owner), enforced server-side validation.
-        allow update: if (isOwnerOf(restaurantId) || isKitchenOf(restaurantId))
+        // Status transitions (kitchen+owner+waiter) and owner payment.
+        allow update: if (
+          ((isOwnerOf(restaurantId) || isKitchenOf(restaurantId) || isWaiterOf(restaurantId))
           && request.resource.data.status != resource.data.status
           && orderStatusCompatible(resource.data.status, request.resource.data.status)
           && request.resource.data.totalAmount == resource.data.totalAmount
           && request.resource.data.restaurantId == resource.data.restaurantId
-          && request.resource.data.tableId == resource.data.tableId;
+          && request.resource.data.tableId == resource.data.tableId)
+          // Owner confirming payment for a SERVED order. Only payment fields may change.
+          || (isOwnerOf(restaurantId)
+            && resource.data.status == 'SERVED'
+            && request.resource.data.status == resource.data.status
+            && resource.data.paymentStatus != 'PAID'
+            && request.resource.data.paymentStatus == 'PAID'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus','paidAt','updatedAt']))
+        );
 
         // ---------- Order items ----------
         match /items/{itemId} {
           allow read: if isOwnerOf(restaurantId)
             || isKitchenOf(restaurantId)
+            || isWaiterOf(restaurantId)
             // Items tied to their parent order's tracking token.
             || (request.auth == null
                 && get(/databases/$(database)/documents/restaurants/$(restaurantId)/orders/$(orderId)).data.trackingToken != null);

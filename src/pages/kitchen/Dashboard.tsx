@@ -5,7 +5,9 @@ import { useRealtimeOrders, useOrderItems } from "../../hooks/useOrders";
 import { Button } from "../../components/common/Button";
 import { StatusBadge } from "../../components/common/StatusBadge";
 import { EmptyState } from "../../components/common/States";
+import { ConfirmDialog } from "../../components/common/Modal";
 import { formatTime } from "../../utils/formatting";
+import { toast } from "sonner";
 import type { Order, OrderStatus } from "../../types/order";
 
 export default function KitchenDashboard() {
@@ -98,6 +100,7 @@ function OrderCard({ order, restaurantId }: { order: Order; restaurantId: string
   const { items } = useOrderItems(restaurantId, order.id);
   const { changeStatus } = useRealtimeOrders(restaurantId);
   const [busy, setBusy] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
 
   const action =
     order.status === "PLACED"
@@ -108,13 +111,31 @@ function OrderCard({ order, restaurantId }: { order: Order; restaurantId: string
       ? { label: "Mark Served", next: "SERVED" as OrderStatus }
       : null;
 
+  const canCancel = order.status === "PLACED" || order.status === "PREPARING";
+
   const handleAction = async () => {
     if (!action || busy) return;
     setBusy(true);
     try {
       await changeStatus(order.id, order.status, action.next);
+    } catch {
+      toast.error("Failed to update order");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await changeStatus(order.id, order.status, "CANCELLED");
+      toast.success("Order cancelled");
+    } catch {
+      toast.error("Failed to cancel order");
+    } finally {
+      setBusy(false);
+      setShowCancel(false);
     }
   };
 
@@ -144,17 +165,35 @@ function OrderCard({ order, restaurantId }: { order: Order; restaurantId: string
           Note: {order.specialInstructions}
         </div>
       )}
-      <div className="mt-3">
+      <div className="mt-3 space-y-2">
         {action && (
           <Button className="w-full" onClick={handleAction} disabled={busy}>
             {busy ? "Updating..." : action.label}
           </Button>
+        )}
+        {canCancel && (
+          <button
+            onClick={() => setShowCancel(true)}
+            disabled={busy}
+            className="w-full py-2 rounded-lg border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
         )}
       </div>
       <div className="mt-2 flex justify-between text-xs text-gray-400">
         <StatusBadge status={order.status} />
         <span>{formatTime(order.createdAt)}</span>
       </div>
+      <ConfirmDialog
+        open={showCancel}
+        title="Cancel Order"
+        message={`Cancel order #${order.id.slice(-4).toUpperCase()}?`}
+        confirmLabel="Cancel Order"
+        danger
+        onConfirm={handleCancel}
+        onCancel={() => setShowCancel(false)}
+      />
     </div>
   );
 }

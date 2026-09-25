@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../../hooks/useAuth";
-import { createKitchenStaff, setStaffActive } from "../../services/staffService";
+import { createStaffWithRole, setStaffActive } from "../../services/staffService";
 import { staffSchema } from "../../utils/validation";
 import { Input } from "../../components/common/Form";
 import { Button } from "../../components/common/Button";
@@ -19,6 +19,7 @@ type StaffForm = {
   fullName: string;
   email: string;
   password: string;
+  role: "KITCHEN" | "WAITER";
 };
 
 export default function OwnerStaff() {
@@ -28,6 +29,7 @@ export default function OwnerStaff() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [role, setRole] = useState<"KITCHEN" | "WAITER">("KITCHEN");
   const {
     register,
     handleSubmit,
@@ -53,15 +55,17 @@ export default function OwnerStaff() {
   async function onSubmit(data: StaffForm) {
     setCreating(true);
     try {
-      await createKitchenStaff({
+      await createStaffWithRole({
         restaurantId,
         fullName: data.fullName,
         email: data.email,
         password: data.password,
+        role,
       });
-      toast.success("Kitchen staff added");
+      toast.success(`${role === "WAITER" ? "Waiter" : "Kitchen"} staff added`);
       setModalOpen(false);
       reset();
+      setRole("KITCHEN");
     } catch (e: unknown) {
       const err = e as { code?: string };
       if (err.code === "auth/email-already-in-use") {
@@ -86,8 +90,8 @@ export default function OwnerStaff() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Kitchen Staff</h1>
-          <p className="text-gray-500 text-sm">Manage who can access the kitchen dashboard</p>
+          <h1 className="text-2xl font-bold text-gray-800">Staff Management</h1>
+          <p className="text-gray-500 text-sm">Manage kitchen and waiter staff for your restaurant</p>
         </div>
         <Button onClick={() => setModalOpen(true)}>
           <Plus className="w-4 h-4" /> Add Staff
@@ -98,8 +102,8 @@ export default function OwnerStaff() {
         <div className="text-center text-gray-500 py-16">Loading staff...</div>
       ) : staff.length === 0 ? (
         <EmptyState
-          title="No kitchen staff"
-          description="Add kitchen staff to allow them to view and update orders."
+          title="No staff yet"
+          description="Add kitchen or waiter staff to allow them to access their dashboards."
           action={
             <Button onClick={() => setModalOpen(true)}>
               <Plus className="w-4 h-4" /> Add Staff
@@ -113,6 +117,7 @@ export default function OwnerStaff() {
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Role</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Created</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Actions</th>
@@ -123,6 +128,11 @@ export default function OwnerStaff() {
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-800">{s.fullName}</td>
                   <td className="px-4 py-3 text-gray-600">{s.email}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${s.role === "WAITER" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>
+                      {s.role}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${
@@ -148,8 +158,15 @@ export default function OwnerStaff() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add Kitchen Staff">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add Staff">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setRole("KITCHEN")} className={`flex-1 py-2 rounded-lg text-sm font-medium border ${role === "KITCHEN" ? "bg-orange-50 border-orange-300 text-orange-700" : "bg-white border-gray-200 text-gray-600"}`}>🍳 Kitchen</button>
+              <button type="button" onClick={() => setRole("WAITER")} className={`flex-1 py-2 rounded-lg text-sm font-medium border ${role === "WAITER" ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600"}`}>🔔 Waiter</button>
+            </div>
+          </div>
           <Input
             label="Full Name"
             placeholder="Staff name"
@@ -171,7 +188,7 @@ export default function OwnerStaff() {
             {...register("password")}
           />
           <p className="text-xs text-gray-500">
-            Staff will use this email/password to log in to the kitchen dashboard.
+            Staff will use this email/password to log in to the {role === "WAITER" ? "waiter" : "kitchen"} dashboard.
           </p>
           <div className="flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>

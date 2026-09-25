@@ -28,6 +28,12 @@ export function useMenu(restaurantId?: string | null) {
     setLoading(true);
     setError(null);
 
+    let catsDone = false;
+    let itemsDone = false;
+    const tryDone = () => {
+      if (catsDone && itemsDone) setLoading(false);
+    };
+
     // Realtime subscription so the category dropdown (and any consumer of this
     // hook) always reflects the current Firestore data, including categories
     // created after this page first loaded.
@@ -37,8 +43,14 @@ export function useMenu(restaurantId?: string | null) {
         setCategories(
           snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MenuCategory, "id">) }))
         );
+        catsDone = true;
+        tryDone();
       },
-      () => setError("Unable to load menu")
+      () => {
+        setError("Unable to load menu");
+        catsDone = true;
+        tryDone();
+      }
     );
 
     const itemsUnsub = onSnapshot(
@@ -47,11 +59,15 @@ export function useMenu(restaurantId?: string | null) {
         setItems(
           snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MenuItem, "id">) }))
         );
+        itemsDone = true;
+        tryDone();
       },
-      () => setError("Unable to load menu")
+      () => {
+        setError("Unable to load menu");
+        itemsDone = true;
+        tryDone();
+      }
     );
-
-    setLoading(false);
 
     return () => {
       catsUnsub();

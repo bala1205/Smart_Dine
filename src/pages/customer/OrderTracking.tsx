@@ -165,10 +165,34 @@ export default function OrderTracking() {
               </div>
             ))}
           </div>
-          <div className="border-t border-gray-100 mt-4 pt-3 flex justify-between font-bold text-gray-900">
-            <span>Total</span>
-            <span>{formatCurrency(order.totalAmount)}</span>
+          <div className="border-t border-gray-100 mt-4 pt-3 space-y-1.5">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>Subtotal</span>
+              <span>{formatCurrency(order.totalAmount)}</span>
+            </div>
+            {order.gstAmount != null && order.gstAmount > 0 && (
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>GST {order.gstPercent ?? 0}%</span>
+                <span>{formatCurrency(order.gstAmount)}</span>
+              </div>
+            )}
+            {order.serviceChargeAmount != null && order.serviceChargeAmount > 0 && (
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>Service Charge {order.serviceChargePercent ?? 0}%</span>
+                <span>{formatCurrency(order.serviceChargeAmount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-gray-900">
+              <span>Total</span>
+              <span>{formatCurrency(order.grandTotal ?? order.totalAmount)}</span>
+            </div>
           </div>
+          <Link
+            to={`/bill/${restaurantId}/${order.id}`}
+            className="mt-4 block w-full text-center py-2.5 rounded-xl bg-brand-600 text-white font-semibold hover:bg-brand-700"
+          >
+            View Digital Bill 🧾
+          </Link>
         </div>
 
         {order.status === "READY" && (

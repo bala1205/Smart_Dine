@@ -4,13 +4,14 @@ A complete, production-ready QR-based restaurant ordering platform built on **Fi
 
 **No Supabase.** Firebase is the single source of truth.
 
-Three user experiences in one system:
+Four user experiences in one system:
 
 | Role | Experience |
 |------|-----------|
-| **Owner** | Web dashboard: restaurant, menu, categories, tables & QR, orders, staff, settings, live stats |
-| **Kitchen** | Web dashboard: real-time order tickets, acknowledge → preparing → ready → served |
-| **Customer** | Public mobile-first web menu: scan QR → order → real-time tracking |
+| **Owner** | Web dashboard: restaurant, menu, categories, tables & QR, orders, staff (kitchen + waiter), settings, analytics, reports, live stats, billing |
+| **Kitchen** | Web dashboard: real-time order tickets, acknowledge → preparing → ready → served, cancel (PLACED/PREPARING) |
+| **Waiter** | Web dashboard: service-request inbox (call waiter / water / bill / assistance), acknowledge → complete, plus tables view |
+| **Customer** | Public mobile-first web menu: scan QR → browse/search → cart → checkout (GST/service charge) → real-time tracking → bill & split → service requests |
 
 > This repository also contains a Flutter Android app (`android/`, `lib/`) that has been
 > configured to use the same Firebase project (`com.example.smartdine`). The main web
@@ -20,17 +21,17 @@ Three user experiences in one system:
 
 ## Tech Stack
 
-- **React 18 + TypeScript + Vite**
-- **Tailwind CSS** + **Lucide React**
-- **React Router** (role-based protected routes)
+- **React 18 + TypeScript + Vite** (code-split vendor/firebase/ui)
+- **Tailwind CSS** + **Lucide React** + **@fontsource/inter**
+- **React Router** (role-based protected routes, OWNER/KITCHEN/WAITER)
 - **React Hook Form + Zod** (front-end validation)
 - **Firebase Web SDK**
-  - Authentication (email/password)
-  - Cloud Firestore (real-time via `onSnapshot`)
-  - Cloud Functions (secure order creation, staff creation)
-  - Cloud Storage **(optional)** — only used for logo / food image uploads; the
-    whole app works without it
-- **QRCode** (QR generation / download / print)
+  - Authentication (email/password, secondary-app for staff creation — owner session preserved)
+  - Cloud Firestore (real-time `onSnapshot`, transactions for stock, batched reports)
+  - Cloud Functions (`createSecureOrder` authoritative GST/stock, `createStaff`/`createKitchenStaff` via Admin SDK)
+  - Cloud Storage **(optional)** — only for logo / food image uploads; whole app works without it
+- **QRCode** (QR generation / download / print) + **Billing** (`utils/billing.ts` + `sanitize.ts` for XSS-safe PDFs)
+- **Vitest** (unit tests for billing, formatting, validation, analytics, order transitions)
 
 > **Firebase Storage is OPTIONAL.** Smart Dine runs 100% on the Firebase **Spark
 > (free) plan** — no billing upgrade, no storage bucket, no image uploads required.
@@ -43,13 +44,16 @@ Three user experiences in one system:
 ## Feature Overview
 
 ### Owner
-Register → create restaurant → add categories → add menu items → add tables → generate/download/print QR → monitor dashboard (Today's orders, active, completed, revenue, menu count, table count) → all orders with status filters → manage kitchen staff → edit restaurant & logo.
+Register → create restaurant → add categories → add menu items (with optional stock tracking, low-stock badges, GST/service-charge) → add tables → generate/download/print QR, toggle `Customer Access` (`isAccessAvailable`) → monitor dashboard (Today's orders, active, completed, revenue, menu/table counts, occupancy) → all orders with status filters + cancel (PLACED/PREPARING) + pagination (`Load more`) → manage **kitchen + waiter** staff (owner session preserved via Cloud Function or secondary app) → analytics (`today/thisWeek/thisMonth/custom` with dish/peak/GST) → reports (`daily/weekly/monthly/custom` with batched CSV BOM + XSS-safe PDF) → edit restaurant & logo (Storage optional) → bill & split view → table occupancy (`AVAILABLE/OCCUPIED/PAYMENT_PENDING`).
 
 ### Kitchen
-Login with owner-created credentials → see only their assigned restaurant → live order tickets with big TABLE number, items, special instructions → `ACKNOWLEDGE → START PREPARING → MARK READY → MARK COMPLETED` with enforced valid transitions.
+Login with owner-created credentials → see only assigned restaurant → Kanban `PLACED/PREPARING/READY` live tickets with big TABLE number, items, special instructions → `START COOKING → MARK READY → MARK SERVED` plus **Cancel** (PLACED/PREPARING) with confirmation → enforced `VALID_ORDER_TRANSITIONS`.
+
+### Waiter
+Login as WAITER → see only assigned restaurant → inbox of customer **service requests** (`CALL_WAITER`, `REQUEST_WATER`, `REQUEST_BILL`, `NEED_ASSISTANCE`) with `PENDING/ACKNOWLEDGED/COMPLETED` filters → `Acknowledge` → `Complete` / `Cancel` → plus tables view (occupancy, order, requests; owner-only actions hidden).
 
 ### Customer
-Scan QR → public menu page (`/menu/:restaurantId/:tableId?token=...`) → search, browse by category, add to cart, sticky cart → checkout → place order → real-time tracking page (`/order/:orderId?token=...`) with a status timeline.
+Scan QR → public menu page (`/menu/:restaurantId/:tableId?token=...`) validates `isActive && qrToken && isAccessAvailable` → search, browse by category, stock `OUT/LOW` badges → add to cart (±, notes) → sticky cart → checkout (re-validates fresh table, shows `calculateBill` subtotal/GST/service/grand) → `createOrder` (tries `createSecureOrder` Cloud Function, falls back to transactional client with server-recomputed prices, stock atomic, GST) → real-time tracking page (`/order/:orderId?token=...` with `trackingToken`) → **Digital Bill** (`/bill/:restaurantId/:orderId`) with historical GST snapshot + `Download` (print, XSS-safe) + `Share` (Web Share API → clipboard) + **Split Bill** (equally by people or by items) → **Service Requests** panel (4 types, 5-min duplicate guard).
 
 ---
 
@@ -57,26 +61,29 @@ Scan QR → public menu page (`/menu/:restaurantId/:tableId?token=...`) → sear
 
 ```
 src/
-  components/  common/ owner/ kitchen/ customer/
-  pages/       auth/ owner/ kitchen/ customer/
-  layouts/     OwnerLayout.tsx KitchenLayout.tsx
-  hooks/       useAuth useRestaurant useMenu useOrders useRealtimeOrders useTables
-  services/    authService restaurantService menuService tableService
-               orderService staffService storageService
+  components/  common/{Button,Form,Modal,States,Spinner,StatusBadge}  customer/ServiceRequestPanel
+  pages/       auth/{Login,Register,ForgotPassword,CompleteSetup,AuthLayout}
+              owner/{Dashboard,Menu,Categories,Tables,Orders,Staff,Settings,Analytics,Reports}
+              kitchen/{Dashboard,Orders}  waiter/Dashboard  customer/{Menu,Checkout,OrderTracking,InvalidTable,Bill,BillShare}
+  layouts/     OwnerLayout.tsx KitchenLayout.tsx WaiterLayout.tsx
+  hooks/       useAuth useRestaurant useMenu useOrders useRealtimeOrders useTables useTableOccupancy useServiceRequests useAnalytics
+  services/    authService restaurantService menuService tableService orderService staffService storageService serviceRequestService
   lib/         firebase.ts
-  types/       auth restaurant menu table order
-  utils/       qr validation formatting session
+  types/       auth restaurant menu table order serviceRequest
+  utils/       qr validation formatting session billing sanitize
   routes/      AppRoutes.tsx ProtectedRoute.tsx
   context/     CartContext.tsx
+  __tests__/   billing.test.ts formatting.test.ts validation.test.ts useAnalytics.test.ts sanitize.test.ts order.test.ts
+  vitest.config.ts
 ```
 
 Backend config:
 
 ```
 firebase.json  firestore.rules  storage.rules  firestore.indexes.json
-functions/     (createSecureOrder, createKitchenStaff)
+functions/     (createSecureOrder, createStaff, createKitchenStaff)  // stock + GST authoritative
 android/app/google-services.json
-.env.example   .firebaserc
+.env.example   .firebaserc  vercel.json
 ```
 
 > `storage.rules` is provided for future use but it is **not referenced** in
@@ -214,29 +221,34 @@ upgrade** and **without Firebase Storage**.
 
 ```
 users/{uid}
-  uid, fullName, email, role ("OWNER"|"KITCHEN"), restaurantId, timestamps
+  uid, fullName, email, role ("OWNER"|"KITCHEN"|"WAITER"), restaurantId, timestamps
 
 restaurants/{restaurantId}
-  name, description, logoUrl, phone, address, ownerId, isActive, timestamps
+  name, description, logoUrl, phone, address, ownerId, isActive, gstPercent, serviceChargePercent, timestamps
 
 restaurants/{restaurantId}/categories/{categoryId}
   name, displayOrder, isActive, timestamps
 
 restaurants/{restaurantId}/menuItems/{menuItemId}
-  name, description, price, categoryId, imageUrl, preparationTime, isAvailable, timestamps
+  name, description, price, categoryId, imageUrl, preparationTime, isAvailable, trackStock, stockEnabled, stockQuantity, lowStockThreshold, timestamps
 
 restaurants/{restaurantId}/tables/{tableId}
-  tableNumber, capacity, qrToken, isActive, timestamps
+  tableNumber, capacity, qrToken, isActive, isAccessAvailable, timestamps
 
 restaurants/{restaurantId}/staff/{staffId}
-  uid, fullName, email, role ("KITCHEN"), isActive, createdAt
+  uid, fullName, email, role ("KITCHEN"|"WAITER"), isActive, createdAt
 
 restaurants/{restaurantId}/orders/{orderId}
   restaurantId, tableId, tableNumber, customerSessionId, status,
-  totalAmount, specialInstructions, trackingToken, timestamps
+  totalAmount, gstPercent, gstAmount, serviceChargePercent, serviceChargeAmount, grandTotal, paymentStatus, qrToken,
+  specialInstructions, trackingToken, timestamps (createdAt, updatedAt, preparingAt, readyAt, servedAt, paidAt)
 
 restaurants/{restaurantId}/orders/{orderId}/items/{orderItemId}
-  menuItemId, itemName, price, quantity, specialInstruction, createdAt
+  menuItemId, itemName, price, quantity, specialInstruction, restaurantId, tableId, qrToken, createdAt
+
+restaurants/{restaurantId}/serviceRequests/{requestId}
+  restaurantId, tableId, tableNumber, requestType/type ("CALL_WAITER"|"REQUEST_WATER"|"REQUEST_BILL"|"NEED_ASSISTANCE"),
+  status ("PENDING"|"ACKNOWLEDGED"|"COMPLETED"|"RESOLVED"|"CANCELLED"), customerSessionId, orderId?, timestamps
 ```
 
 **Order status flow (enforced):**
@@ -253,22 +265,12 @@ PLACED → CANCELLED   (also allowed from PREPARING)
 
 ## Security
 
-- **Firestore rules** (`firestore.rules`): owners only access their own restaurant
-  (via `restaurants/{id}` where `ownerId == request.auth.uid`); kitchen access is
-  limited to their assigned restaurant's orders with valid status transitions only;
-  public (unauthenticated) access is limited to menu/restaurant/table data.
-- **Order creation security.** Orders are ideally created through the
-  `createSecureOrder` Cloud Function, which re-validates everything and computes the
-  total server-side. On the free Spark plan (no Cloud Functions), the app falls back
-  to client-side order creation: the `createOrder` service re-reads menu prices from
-  Firestore and re-validates restaurant/table/QR token, and `firestore.rules` only
-  allow an unauthenticated `PLACED` order for an active table whose QR token matches.
-- **Storage rules** (`storage.rules`): included for future use. Storage is optional;
-  the app works without it, so this file is **not** deployed by default.
-- **No passwords stored**, **no Admin SDK keys in the frontend**, **no fake data** —
-  all production data comes from Firestore.
-- Customer order tracking uses an unpredictable `trackingToken`; customers can only
-  see the order whose token they hold.
+- **Firestore rules** (`firestore.rules` 265+ lines): `isOwnerOf` / `isKitchenOf` / `isWaiterOf` helpers; owners only access own restaurant (`restaurants/{id}.ownerId`); kitchen/waiter limited to assigned `restaurantId`; staff `isActive` not bypassed; `serviceRequests` `allow get` staff-only + `allow list` customer filtered `where tableId && customerSessionId` (prevents enumeration) + 5-clause composite indexes; stock decrement only via `stockQuantity` decrease + `name/price/categoryId` unchanged.
+- **Order creation security.** `createSecureOrder` is authoritative: validates `isActive`, `isAccessAvailable`, QR token, menu `isAvailable`, price, **stock (trackStock/stockEnabled)**, computes `totalAmount + gstAmount + serviceChargeAmount + grandTotal` server-side with same `Math.round(...*100)/100`, transactional stock decrement (`isAvailable=false` if 0). Client fallback `createClientOrder` mirrors same transaction — **never trust client price/total**. `firestore.rules` `tableQrValid` gates Spark fallback to active table matching QR token.
+- **Staff creation security.** Owner stays signed in: `createStaff` Cloud Function (Admin SDK, `ownerId` check, `already-exists` guard) is preferred; fallback uses **secondary Firebase app** (`initializeApp(..., "secondary-staff-creator")` + `signOut` after) so primary auth not switched. No Admin SDK keys in frontend.
+- **Storage rules** (`storage.rules`): `size < 2 MiB` + `image/.*`, owner-only `firestore.get` check; **not referenced** in `firebase.json` on Spark (deploys without bucket).
+- **XSS:** Bills/Reports PDFs use `escapeHtml` + `sanitizeUrl` (`utils/sanitize.ts`) before `document.write`; CSR CSV has BOM `\uFEFF` + quoted fields.
+- **No passwords stored**, **no Admin SDK keys in frontend**, **no fake data** — all production data from Firestore. Tracking via unpredictable `trackingToken`; customers only see own order/request via token/session.
 
 > **Realtime:** All dashboards and tracking use Firestore `onSnapshot` listeners
 > (properly unsubscribed) — no polling, no manual refresh.
@@ -319,8 +321,11 @@ flutter build apk
 
 ```
 npm install
-npm run lint   # 0 errors
-npm run build  # type-check + bundle, no errors
+npm run lint   # 0 errors (3 react-refresh warnings)
+npm test       # 48 tests (billing, formatting, validation, analytics, sanitize, order transitions)
+npm run build  # tsc + vite build, code-split vendor/firebase/ui/forms
+npx tsc --noEmit
+dart analyze   # flutter wrapper
 ```
 
 > Note: The first `npm install` on this machine was interrupted; if you see

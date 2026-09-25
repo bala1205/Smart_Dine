@@ -10,12 +10,15 @@ import { setRestaurantContext } from "../../utils/session";
 import type { Table } from "../../types/table";
 import { PageLoader } from "../../components/common/Spinner";
 import { ErrorState, EmptyState } from "../../components/common/States";
+import ServiceRequestPanel from "../../components/customer/ServiceRequestPanel";
+import { VoiceOrder } from "../../components/customer/VoiceOrder";
+import { NaturalLanguageOrder } from "../../components/customer/NaturalLanguageOrder";
 
 export default function CustomerMenu() {
   const { restaurantId = "", tableId = "" } = useParams();
   const token = new URLSearchParams(window.location.search).get("token") || "";
   const [table, setTable] = useState<Table | null>(null);
-  const [invalid, setInvalid] = useState<false | "loading" | "table" | "restaurant">("loading");
+  const [invalid, setInvalid] = useState<false | "loading" | "table" | "restaurant" | "access">("loading");
   const [activeCat, setActiveCat] = useState<string>("all");
   const [query, setQuery] = useState("");
 
@@ -23,13 +26,13 @@ export default function CustomerMenu() {
   const { categories, items, loading: mLoading } = useMenu(restaurantId);
 
   useEffect(() => {
-    console.log("[QR_SESSION] menu loaded", {
+    if (import.meta.env.DEV) console.log("[QR_SESSION] menu loaded", {
       restaurantId,
       tableId,
       hasQrToken: !!token,
     });
     setRestaurantContext(restaurantId, tableId, token);
-    console.log("[QR_SESSION] session saved", {
+    if (import.meta.env.DEV) console.log("[QR_SESSION] session saved", {
       restaurantId,
       tableId,
       hasQrToken: !!token,
@@ -42,6 +45,8 @@ export default function CustomerMenu() {
       .then((t) => {
         if (!t || !t.isActive || t.qrToken !== token) {
           setInvalid("table");
+        } else if ((t as unknown as { isAccessAvailable?: boolean }).isAccessAvailable === false) {
+          setInvalid("access");
         } else {
           setTable(t);
           setInvalid(false);
@@ -72,6 +77,18 @@ export default function CustomerMenu() {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
         <PageLoader label="Loading restaurant..." />
+      </div>
+    );
+  }
+
+  if (invalid === "access") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-center max-w-sm">
+          <div className="text-5xl mb-4">🚫</div>
+          <h1 className="text-2xl font-bold text-gray-800">Table Currently Unavailable</h1>
+          <p className="text-gray-600 mt-2">Please contact the restaurant staff.</p>
+        </div>
       </div>
     );
   }
@@ -113,25 +130,27 @@ export default function CustomerMenu() {
   const visibleCategories = categories.filter((c) => c.isActive);
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-28">
-      <div className="bg-gradient-to-r from-brand-600 to-brand-700 text-white">
+    <div className="min-h-screen bg-surface-50 pb-28">
+      <div className="bg-gradient-to-br from-ink-900 via-ink-900 to-brand-700 text-white">
         <div className="max-w-lg mx-auto px-4 py-6">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3.5">
             {restaurant.logoUrl ? (
               <img
                 src={restaurant.logoUrl}
                 alt={restaurant.name}
-                className="w-14 h-14 rounded-full object-cover bg-white"
+                className="w-14 h-14 rounded-2xl object-cover bg-white shadow-sm border-2 border-white/20"
               />
             ) : (
-              <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-xl font-bold">
+              <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center text-xl font-bold border border-white/20">
                 {restaurant.name.charAt(0).toUpperCase()}
               </div>
             )}
             <div>
-              <h1 className="text-xl font-bold">{restaurant.name}</h1>
+              <h1 className="text-xl font-bold tracking-tight">{restaurant.name}</h1>
+              <p className="text-white/70 text-xs mt-0.5 line-clamp-1">{restaurant.description || "Fresh flavors, fast service"}</p>
               {table && (
-                <span className="inline-flex items-center gap-1 text-sm bg-white/20 rounded-full px-2.5 py-0.5 mt-1">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white text-ink-900 rounded-full px-2.5 py-1 mt-1.5 shadow-sm">
+                  <span className="w-1.5 h-1.5 bg-success-500 rounded-full animate-pulse" />
                   Table {table.tableNumber}
                 </span>
               )}
@@ -140,24 +159,24 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-gray-50 py-3">
+      <div className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-surface-50/95 backdrop-blur supports-[backdrop-filter]:bg-surface-50/80 py-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search food..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            placeholder="Search dishes, categories..."
+            className="w-full pl-10 pr-4 py-3 rounded-2xl border border-surface-200 bg-white text-sm placeholder:text-ink-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
           />
         </div>
       </div>
 
       <div className="max-w-lg mx-auto px-4">
-        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4">
+        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 scrollbar-none">
           <button
             onClick={() => setActiveCat("all")}
-            className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-              activeCat === "all" ? "bg-brand-600 text-white" : "bg-white text-gray-600 shadow-sm"
+            className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+              activeCat === "all" ? "bg-ink-900 text-white shadow-sm" : "bg-white text-ink-600 border border-surface-200 hover:border-surface-300"
             }`}
           >
             All
@@ -166,14 +185,33 @@ export default function CustomerMenu() {
             <button
               key={c.id}
               onClick={() => setActiveCat(c.id)}
-              className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                activeCat === c.id ? "bg-brand-600 text-white" : "bg-white text-gray-600 shadow-sm"
+              className={`whitespace-nowrap px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                activeCat === c.id ? "bg-ink-900 text-white shadow-sm" : "bg-white text-ink-600 border border-surface-200 hover:border-surface-300"
               }`}
             >
               {c.name}
             </button>
           ))}
         </div>
+      </div>
+
+      {table && (
+        <div className="max-w-lg mx-auto px-4 py-2">
+          <ServiceRequestPanel
+            restaurantId={restaurantId}
+            tableId={tableId}
+            tableNumber={table.tableNumber}
+          />
+        </div>
+      )}
+
+      {/* AI-assisted ordering — voice + natural language, mobile-first, accessible */}
+      <div className="max-w-lg mx-auto px-4 py-3 space-y-4">
+        <div className="sr-only" aria-live="polite">
+          SmartDine AI ordering available: voice and text
+        </div>
+        <VoiceOrder restaurantId={restaurantId} menu={items} />
+        <NaturalLanguageOrder restaurantId={restaurantId} menu={items} />
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-4 space-y-3">
@@ -184,27 +222,36 @@ export default function CustomerMenu() {
           />
         )}
         {activeItems.map((item) => {
-          const available = item.isAvailable;
+          const enabled = (item as unknown as { trackStock?: boolean; stockEnabled?: boolean }).trackStock || (item as unknown as { stockEnabled?: boolean }).stockEnabled;
+          const qty = Number((item as unknown as { stockQuantity?: number }).stockQuantity);
+          const threshold = Number((item as unknown as { lowStockThreshold?: number }).lowStockThreshold ?? 5);
+          const isOut = enabled && qty <= 0;
+          const lowStock = enabled && qty > 0 && qty <= threshold;
+          const available = item.isAvailable && !isOut;
           return (
-            <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex gap-4">
+            <div key={item.id} className="bg-white rounded-2xl border border-surface-200 p-4 flex gap-4 shadow-card hover:shadow-medium transition-shadow">
               {item.imageUrl ? (
                 <img
                   src={item.imageUrl}
                   alt={item.name}
-                  className="w-20 h-20 rounded-xl object-cover flex-shrink-0"
+                  className="w-20 h-20 rounded-xl object-cover flex-shrink-0 border border-surface-100"
                 />
               ) : (
-                <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center text-2xl flex-shrink-0">
+                <div className="w-20 h-20 rounded-xl bg-surface-50 border border-surface-200 flex items-center justify-center text-2xl flex-shrink-0">
                   🍽️
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-gray-800">{item.name}</h3>
+                <h3 className="font-bold tracking-tight text-ink-900 flex items-center gap-2">
+                  {item.name}
+                  {isOut && <span className="text-[11px] font-bold tracking-wide bg-danger-50 text-danger-700 border border-danger-100 px-2 py-0.5 rounded-full">OUT</span>}
+                  {!isOut && lowStock && <span className="text-[11px] font-bold tracking-wide bg-warning-50 text-warning-700 border border-warning-100 px-2 py-0.5 rounded-full">LOW</span>}
+                </h3>
                 {item.description && (
-                  <p className="text-sm text-gray-500 line-clamp-2 mt-0.5">{item.description}</p>
+                  <p className="text-sm text-ink-500 line-clamp-2 mt-1">{item.description}</p>
                 )}
-                <div className="flex items-center justify-between mt-2">
-                  <span className="font-bold text-gray-900">{formatCurrency(item.price)}</span>
+                <div className="flex items-center justify-between mt-3">
+                  <span className="font-bold text-ink-900 text-[15px]">{formatCurrency(item.price)}</span>
                   {available ? (
                     (() => {
                       const line = lines.find((l) => l.menuItemId === item.id);
@@ -240,8 +287,8 @@ export default function CustomerMenu() {
                       );
                     })()
                   ) : (
-                    <span className="text-xs font-medium text-gray-400 bg-gray-100 px-2.5 py-1.5 rounded-lg">
-                      Unavailable
+                    <span className={`text-xs font-medium px-2.5 py-1.5 rounded-lg ${isOut ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-400"}`}>
+                      {isOut ? "OUT OF STOCK" : "Unavailable"}
                     </span>
                   )}
                 </div>
@@ -266,6 +313,59 @@ export default function CustomerMenu() {
       )}
 
       <CartDrawer />
+    </div>
+  );
+}
+
+function NfcHint({
+  restaurantId,
+  tableId,
+  token,
+  tableNumber,
+}: {
+  restaurantId: string;
+  tableId: string;
+  token: string;
+  tableNumber?: number;
+}) {
+  const [nfcSupported, setNfcSupported] = useState<boolean | null>(null);
+  useEffect(() => {
+    // Feature detection for Web NFC (Chrome Android)
+    const hasNfc = typeof window !== "undefined" && "NDEFReader" in window;
+    setNfcSupported(hasNfc);
+    // Also check for NFC via navigator.nfc (future)
+    // Graceful fallback: if not supported, hint is hidden or shows QR alternative
+  }, []);
+
+  const tableUrl = `${window.location.origin}/menu/${restaurantId}/${tableId}?token=${token}`;
+
+  if (nfcSupported === false) {
+    return (
+      <div className="bg-white rounded-2xl border border-surface-200 p-3 flex items-center gap-3" role="status" aria-live="polite">
+        <div className="w-8 h-8 rounded-xl bg-surface-50 border border-surface-200 flex items-center justify-center" aria-hidden="true">
+          📱
+        </div>
+        <div>
+          <p className="text-sm font-medium text-ink-900">Tap to order — QR + NFC ready</p>
+          <p className="text-xs text-ink-500">
+            Table {tableNumber ?? ""} • QR active • NFC {nfcSupported ? "available" : "not supported on this device — use QR or ask waiter"}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (nfcSupported === null) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-brand-100 p-3 flex items-center gap-3" role="status">
+      <div className="w-8 h-8 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center" aria-hidden="true">
+        📡
+      </div>
+      <div>
+        <p className="text-sm font-medium text-ink-900">NFC ready — tap phone to table tag</p>
+        <p className="text-xs text-ink-500 break-all">URL: {tableUrl}</p>
+      </div>
     </div>
   );
 }

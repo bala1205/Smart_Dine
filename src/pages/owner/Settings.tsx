@@ -16,6 +16,8 @@ type SettingsForm = {
   description: string;
   phone: string;
   address: string;
+  gstPercent: number;
+  serviceChargePercent: number;
 };
 
 export default function OwnerSettings() {
@@ -75,6 +77,8 @@ export default function OwnerSettings() {
         phone: data.phone,
         address: data.address,
         logoUrl,
+        gstPercent: Number(data.gstPercent) || 0,
+        serviceChargePercent: Number(data.serviceChargePercent) || 0,
       });
       setRestaurant({
         ...restaurant,
@@ -83,6 +87,8 @@ export default function OwnerSettings() {
         phone: data.phone,
         address: data.address,
         logoUrl,
+        gstPercent: Number(data.gstPercent) || 0,
+        serviceChargePercent: Number(data.serviceChargePercent) || 0,
       });
       toast.success("Settings saved");
     } catch {
@@ -149,6 +155,27 @@ export default function OwnerSettings() {
             error={errors.address?.message}
             {...register("address")}
           />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="GST %"
+              type="number"
+              step="0.1"
+              placeholder="5"
+              defaultValue={String(restaurant.gstPercent ?? 0)}
+              error={errors.gstPercent?.message}
+              {...register("gstPercent")}
+            />
+            <Input
+              label="Service Charge %"
+              type="number"
+              step="0.1"
+              placeholder="5"
+              defaultValue={String(restaurant.serviceChargePercent ?? 0)}
+              error={errors.serviceChargePercent?.message}
+              {...register("serviceChargePercent")}
+            />
+          </div>
+          <p className="text-xs text-gray-500">Bill will show GST and Service Charge based on these percentages. Set 0 to disable.</p>
           <Button type="submit" loading={saving || uploading}>
             Save Changes
           </Button>

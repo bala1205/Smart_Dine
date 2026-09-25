@@ -26,6 +26,13 @@ export interface Order {
   specialInstructions: string;
   trackingToken: string;
   qrToken?: string;
+  gstPercent?: number;
+  gstAmount?: number;
+  serviceChargePercent?: number;
+  serviceChargeAmount?: number;
+  grandTotal?: number;
+  paymentStatus?: "PENDING" | "PAID";
+  paidAt?: number;
   createdAt: number;
   updatedAt: number;
   preparingAt?: number;

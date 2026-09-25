@@ -25,6 +25,9 @@ type MenuForm = {
   price: number;
   categoryId: string;
   preparationTime: number;
+  trackStock: boolean;
+  stockQuantity: number;
+  lowStockThreshold: number;
 };
 
 export default function OwnerMenu() {
@@ -45,11 +48,13 @@ export default function OwnerMenu() {
     handleSubmit,
     reset,
     control,
+    watch,
     formState: { errors },
   } = useForm<MenuForm>({
     resolver: zodResolver(menuItemSchema),
-    defaultValues: { categoryId: "" },
+    defaultValues: { categoryId: "", trackStock: false, stockQuantity: 0, lowStockThreshold: 5 },
   });
+  const trackStock = watch("trackStock");
 
   const filtered = useMemo(() => {
     let list = items.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -70,6 +75,9 @@ export default function OwnerMenu() {
       price: 0,
       categoryId: categories[0]?.id || "",
       preparationTime: 0,
+      trackStock: false,
+      stockQuantity: 0,
+      lowStockThreshold: 5,
     });
     setModalOpen(true);
   }
@@ -77,12 +85,16 @@ export default function OwnerMenu() {
   function openEdit(item: MenuItem) {
     setEditing(item);
     setImageFile(null);
+    const enabled = (item as unknown as { stockEnabled?: boolean }).stockEnabled ?? item.trackStock ?? false;
     reset({
       name: item.name,
       description: item.description,
       price: item.price,
       categoryId: item.categoryId,
       preparationTime: item.preparationTime,
+      trackStock: enabled,
+      stockQuantity: item.stockQuantity ?? 0,
+      lowStockThreshold: item.lowStockThreshold ?? 5,
     });
     setModalOpen(true);
   }
@@ -113,6 +125,7 @@ export default function OwnerMenu() {
           setUploading(false);
         }
       }
+      const enabled = (data as unknown as { stockEnabled?: boolean }).stockEnabled ?? data.trackStock;
       if (editing) {
         await updateMenuItem(restaurantId, editing.id, {
           name: data.name,
@@ -121,6 +134,10 @@ export default function OwnerMenu() {
           categoryId: data.categoryId,
           preparationTime: data.preparationTime,
           imageUrl,
+          trackStock: enabled,
+          stockEnabled: enabled,
+          stockQuantity: enabled ? Number(data.stockQuantity) : 0,
+          lowStockThreshold: enabled ? Number(data.lowStockThreshold) : 5,
         });
         toast.success("Item updated");
       } else {
@@ -132,6 +149,10 @@ export default function OwnerMenu() {
           preparationTime: data.preparationTime,
           imageUrl,
           isAvailable: true,
+          trackStock: enabled,
+          stockEnabled: enabled,
+          stockQuantity: enabled ? Number(data.stockQuantity) : 0,
+          lowStockThreshold: enabled ? Number(data.lowStockThreshold) : 5,
         });
         toast.success("Item added");
       }
@@ -225,36 +246,51 @@ export default function OwnerMenu() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((item) => (
-            <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex gap-4">
-              {item.imageUrl ? (
-                <img src={item.imageUrl} alt={item.name} className="w-20 h-20 rounded-lg object-cover flex-shrink-0" />
-              ) : (
-                <div className="w-20 h-20 rounded-lg bg-gray-100 flex items-center justify-center text-2xl flex-shrink-0">🍽️</div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-semibold text-gray-800 truncate">{item.name}</h3>
-                  <button onClick={() => openEdit(item)} className="text-gray-400 hover:text-gray-600">
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-0.5">{catName(item.categoryId)}</p>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="font-bold text-gray-900">{formatCurrency(item.price)}</span>
-                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={item.isAvailable}
-                      onChange={() => toggleAvailable(item)}
-                      className="accent-brand-600"
-                    />
-                    Available
-                  </label>
+          {filtered.map((item) => {
+            const enabled = (item as unknown as { stockEnabled?: boolean }).stockEnabled ?? item.trackStock;
+            const isLow = enabled && item.stockQuantity <= (item.lowStockThreshold ?? 5) && item.stockQuantity > 0;
+            const isOut = enabled && item.stockQuantity <= 0;
+            return (
+              <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex gap-4">
+                {item.imageUrl ? (
+                  <img src={item.imageUrl} alt={item.name} className="w-20 h-20 rounded-lg object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-20 h-20 rounded-lg bg-gray-100 flex items-center justify-center text-2xl flex-shrink-0">🍽️</div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-semibold text-gray-800 truncate">{item.name}</h3>
+                    <button onClick={() => openEdit(item)} className="text-gray-400 hover:text-gray-600">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{catName(item.categoryId)}</p>
+                  {item.trackStock && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Stock: {item.stockQuantity}</span>
+                      {isOut ? (
+                        <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">OUT OF STOCK</span>
+                      ) : isLow ? (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">LOW STOCK</span>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="font-bold text-gray-900">{formatCurrency(item.price)}</span>
+                    <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={item.isAvailable}
+                        onChange={() => toggleAvailable(item)}
+                        className="accent-brand-600"
+                      />
+                      Available
+                    </label>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -313,6 +349,19 @@ export default function OwnerMenu() {
               </Select>
             )}
           />
+          <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+              <input type="checkbox" {...register("trackStock")} className="accent-brand-600" />
+              Track Stock
+            </label>
+            {trackStock && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <Input label="Stock Quantity" type="number" placeholder="10" error={errors.stockQuantity?.message} {...register("stockQuantity")} />
+                <Input label="Low Stock Threshold" type="number" placeholder="5" error={errors.lowStockThreshold?.message} {...register("lowStockThreshold")} />
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mt-2">When enabled, stock will auto-decrement on orders and show low/out of stock badges. Out-of-stock items cannot be added to cart.</p>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Image</label>
             <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 text-sm text-gray-600 cursor-pointer hover:border-brand-400">

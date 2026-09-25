@@ -14,15 +14,22 @@ import OwnerTables from "../pages/owner/Tables";
 import OwnerOrders from "../pages/owner/Orders";
 import OwnerStaff from "../pages/owner/Staff";
 import OwnerSettings from "../pages/owner/Settings";
+import OwnerAnalytics from "../pages/owner/Analytics";
+import OwnerReports from "../pages/owner/Reports";
 
 import KitchenLayout from "../layouts/KitchenLayout";
 import KitchenDashboard from "../pages/kitchen/Dashboard";
 import KitchenOrders from "../pages/kitchen/Orders";
 
+import WaiterLayout from "../layouts/WaiterLayout";
+import WaiterDashboard from "../pages/waiter/Dashboard";
+
 import CustomerMenu from "../pages/customer/Menu";
 import CustomerCheckout from "../pages/customer/Checkout";
 import CustomerOrderTracking from "../pages/customer/OrderTracking";
 import InvalidTable from "../pages/customer/InvalidTable";
+import DigitalBill from "../pages/customer/Bill";
+import BillShare from "../pages/customer/BillShare";
 
 function HomeRedirect() {
   const { user, profile, loading } = useAuth();
@@ -31,7 +38,9 @@ function HomeRedirect() {
   // ProtectedRoute which will show the recovery screen instead of a login loop.
   if (user && !profile) return <Navigate to="/owner" replace />;
   if (!profile) return <Navigate to="/login" replace />;
-  return <Navigate to={profile.role === "OWNER" ? "/owner/dashboard" : "/kitchen/dashboard"} replace />;
+  if (profile.role === "OWNER") return <Navigate to="/owner/dashboard" replace />;
+  if (profile.role === "WAITER") return <Navigate to="/waiter/dashboard" replace />;
+  return <Navigate to="/kitchen/dashboard" replace />;
 }
 
 export default function AppRoutes() {
@@ -58,6 +67,8 @@ export default function AppRoutes() {
         <Route path="tables" element={<OwnerTables />} />
         <Route path="orders" element={<OwnerOrders />} />
         <Route path="staff" element={<OwnerStaff />} />
+        <Route path="analytics" element={<OwnerAnalytics />} />
+        <Route path="reports" element={<OwnerReports />} />
         <Route path="settings" element={<OwnerSettings />} />
       </Route>
 
@@ -76,6 +87,20 @@ export default function AppRoutes() {
       </Route>
 
       <Route
+        path="/waiter"
+        element={
+          <ProtectedRoute>
+            <RoleRoute role="WAITER">
+              <WaiterLayout />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      >
+        <Route path="dashboard" element={<WaiterDashboard />} />
+        <Route path="tables" element={<OwnerTables />} />
+      </Route>
+
+      <Route
         path="/menu/:restaurantId/:tableId"
         element={<CustomerMenu />}
       />
@@ -84,6 +109,8 @@ export default function AppRoutes() {
         element={<CustomerCheckout />}
       />
       <Route path="/order/:orderId" element={<CustomerOrderTracking />} />
+      <Route path="/bill/:restaurantId/:orderId" element={<DigitalBill />} />
+      <Route path="/bill/:restaurantId/:orderId/share" element={<BillShare />} />
       <Route path="/menu/invalid/invalid" element={<InvalidTable />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />

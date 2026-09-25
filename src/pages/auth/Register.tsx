@@ -44,7 +44,7 @@ export default function Register() {
       // Development/diagnosis: log the real Firebase error (code + message) to
       // the browser console so it is never hidden behind the generic toast.
       const wrapped = err as { code?: string; message?: string };
-      console.error("[register] failed. code:", wrapped?.code, "message:", wrapped?.message, "full:", err);
+      if (import.meta.env.DEV) console.error("[register] failed. code:", wrapped?.code, "message:", wrapped?.message, "full:", err);
       toast.error(getRegistrationErrorMessage(err));
     } finally {
       setLoading(false);

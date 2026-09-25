@@ -14,13 +14,15 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className={`relative bg-white rounded-2xl shadow-xl w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[90vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className={`relative bg-white rounded-3xl shadow-medium w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[90vh] overflow-y-auto border border-surface-200 animate-in fade-in zoom-in duration-200`}
+      >
+        <div className="flex items-center justify-between px-6 py-5 border-b border-surface-100">
+          <h3 className="text-lg font-bold tracking-tight text-ink-900">{title}</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100"
+            className="text-ink-400 hover:text-ink-700 p-2 rounded-xl hover:bg-surface-50 transition-colors"
             aria-label="Close"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -28,7 +30,7 @@ export function Modal({
             </svg>
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-6">{children}</div>
       </div>
     </div>
   );
@@ -55,20 +57,20 @@ export function ConfirmDialog({
 }) {
   return (
     <Modal open={open} onClose={onCancel} title={title}>
-      <p className="text-sm text-gray-600">{message}</p>
+      <p className="text-sm leading-relaxed text-ink-500">{message}</p>
       <div className="flex justify-end gap-3 mt-6">
         <button
           onClick={onCancel}
           disabled={loading}
-          className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-ink-700 bg-white border border-surface-200 hover:bg-surface-50 disabled:opacity-50"
         >
           Cancel
         </button>
         <button
           onClick={onConfirm}
           disabled={loading}
-          className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 ${
-            danger ? "bg-red-600 hover:bg-red-700" : "bg-brand-600 hover:bg-brand-700"
+          className={`px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm disabled:opacity-50 transition-colors ${
+            danger ? "bg-danger-600 hover:bg-danger-700" : "bg-brand-600 hover:bg-brand-700"
           }`}
         >
           {confirmLabel}

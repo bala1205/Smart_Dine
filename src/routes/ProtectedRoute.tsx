@@ -54,11 +54,13 @@ export function RoleRoute({
   }
 
   if (profile.role !== role) {
-    return <Navigate to={profile.role === "OWNER" ? "/owner/dashboard" : "/kitchen/dashboard"} replace />;
-  }
-
-  if (location.pathname.startsWith(`/${role.toLowerCase()}`) && profile.restaurantId) {
-    return <>{children}</>;
+    const target =
+      profile.role === "OWNER"
+        ? "/owner/dashboard"
+        : profile.role === "WAITER"
+        ? "/waiter/dashboard"
+        : "/kitchen/dashboard";
+    return <Navigate to={target} replace />;
   }
 
   return <>{children}</>;

@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useRealtimeOrders, useOrderItems } from "../../hooks/useOrders";
 import { StatusBadge } from "../../components/common/StatusBadge";
 import { EmptyState } from "../../components/common/States";
-import { Modal } from "../../components/common/Modal";
+import { Modal, ConfirmDialog } from "../../components/common/Modal";
 import { formatCurrency, formatDate, formatDateOnly, formatTime } from "../../utils/formatting";
 import type { Order, OrderStatus } from "../../types/order";
 import type { OrderItem } from "../../types/order";
+import { toast } from "sonner";
 
 const FILTERS: { label: string; value: OrderStatus | null }[] = [
   { label: "All", value: null },
@@ -37,6 +38,7 @@ export default function OwnerOrders() {
   const [status, setStatus] = useState<OrderStatus | null>(null);
   const { orders, loading, changeStatus } = useRealtimeOrders(restaurantId);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [visible, setVisible] = useState(20);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { PLACED: 0, PREPARING: 0, READY: 0, SERVED: 0, CANCELLED: 0 };
@@ -51,6 +53,11 @@ export default function OwnerOrders() {
   }, [orders, status]);
 
   const sorted = [...filtered].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const paged = sorted.slice(0, visible);
+
+  useEffect(() => {
+    setVisible(20);
+  }, [status]);
 
   return (
     <div>
@@ -83,7 +90,7 @@ export default function OwnerOrders() {
         <EmptyState title="No orders yet" description="Customer orders will appear here in real time." />
       ) : (
         <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
-          {sorted.map((order) => (
+          {paged.map((order) => (
             <button
               key={order.id}
               onClick={() => setSelected(order)}
@@ -108,6 +115,16 @@ export default function OwnerOrders() {
               <StatusBadge status={order.status} />
             </button>
           ))}
+          {sorted.length > visible && (
+            <div className="p-4 text-center">
+              <button
+                onClick={() => setVisible((v) => v + 20)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Load more ({sorted.length - visible} remaining)
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -136,6 +153,7 @@ function OrderDetailModal({
 }) {
   const { items } = useOrderItems(restaurantId, order.id);
   const [busy, setBusy] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
 
   const action =
     order.status === "PLACED"
@@ -146,14 +164,33 @@ function OrderDetailModal({
       ? { label: "Mark Served", next: "SERVED" as OrderStatus }
       : null;
 
+  const canCancel = order.status === "PLACED" || order.status === "PREPARING";
+
   const handleAction = async () => {
     if (!action || busy) return;
     setBusy(true);
     try {
       await changeStatus(order.id, order.status, action.next);
       onClose();
+    } catch {
+      toast.error("Failed to update order");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await changeStatus(order.id, order.status, "CANCELLED");
+      toast.success("Order cancelled");
+      onClose();
+    } catch {
+      toast.error("Failed to cancel order");
+    } finally {
+      setBusy(false);
+      setShowCancel(false);
     }
   };
 
@@ -228,7 +265,25 @@ function OrderDetailModal({
             {busy ? "Updating..." : action.label}
           </button>
         )}
+        {canCancel && (
+          <button
+            onClick={() => setShowCancel(true)}
+            disabled={busy}
+            className="w-full py-2 rounded-lg border border-red-200 text-red-600 font-medium hover:bg-red-50 disabled:opacity-60"
+          >
+            Cancel Order
+          </button>
+        )}
       </div>
+      <ConfirmDialog
+        open={showCancel}
+        title="Cancel Order"
+        message={`Cancel order #${order.id.slice(-4).toUpperCase()}? This cannot be undone and stock will not be restored.`}
+        confirmLabel="Cancel Order"
+        danger
+        onConfirm={handleCancel}
+        onCancel={() => setShowCancel(false)}
+      />
     </Modal>
   );
 }

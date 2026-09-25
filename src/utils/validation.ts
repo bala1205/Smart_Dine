@@ -32,6 +32,10 @@ export const menuItemSchema = z.object({
   price: z.coerce.number().positive("Price must be greater than 0"),
   categoryId: z.string().min(1, "Category is required"),
   preparationTime: z.coerce.number().min(0, "Preparation time cannot be negative").default(0),
+  trackStock: z.boolean().optional().default(false),
+  stockEnabled: z.boolean().optional(),
+  stockQuantity: z.coerce.number().min(0).optional().default(0),
+  lowStockThreshold: z.coerce.number().min(0).optional().default(5),
 });
 
 export const tableSchema = z.object({
@@ -50,6 +54,8 @@ export const restaurantSchema = z.object({
   description: z.string().optional().default(""),
   phone: z.string().optional().default(""),
   address: z.string().optional().default(""),
+  gstPercent: z.coerce.number().min(0).max(100).default(0),
+  serviceChargePercent: z.coerce.number().min(0).max(100).default(0),
 });
 
 export function fileValidation(file: File, maxMB = 2): string | null {

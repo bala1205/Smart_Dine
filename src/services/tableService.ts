@@ -26,7 +26,10 @@ function generateToken(): string {
 export async function getTables(restaurantId: string): Promise<Table[]> {
   const q = query(tableCol(restaurantId), orderBy("tableNumber", "asc"));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Table, "id">) }));
+  return snap.docs.map((d) => {
+    const data = d.data() as Omit<Table, "id">;
+    return { id: d.id, ...data, isAccessAvailable: (data as { isAccessAvailable?: boolean }).isAccessAvailable ?? true } as Table;
+  });
 }
 
 export async function getTable(
@@ -35,7 +38,12 @@ export async function getTable(
 ): Promise<Table | null> {
   const snap = await getDoc(doc(tableCol(restaurantId), tableId));
   if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as Omit<Table, "id">) };
+  const data = snap.data() as Omit<Table, "id">;
+  return { id: snap.id, ...data, isAccessAvailable: (data as { isAccessAvailable?: boolean }).isAccessAvailable ?? true } as Table;
+}
+
+export async function setTableAccessAvailable(restaurantId: string, tableId: string, isAccessAvailable: boolean) {
+  return updateTable(restaurantId, tableId, { isAccessAvailable });
 }
 
 export async function addTable(
@@ -49,6 +57,7 @@ export async function addTable(
     capacity: data.capacity,
     qrToken,
     isActive: true,
+    isAccessAvailable: true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

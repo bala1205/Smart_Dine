@@ -16,6 +16,11 @@ export interface MenuItem {
   imageUrl: string;
   preparationTime: number;
   isAvailable: boolean;
+  trackStock: boolean;
+  /** alias for trackStock per new spec */
+  stockEnabled?: boolean;
+  stockQuantity: number;
+  lowStockThreshold: number;
   createdAt: number;
   updatedAt: number;
 }

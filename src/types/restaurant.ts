@@ -7,6 +7,8 @@ export interface Restaurant {
   address: string;
   ownerId: string;
   isActive: boolean;
+  gstPercent: number;
+  serviceChargePercent: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -16,7 +18,7 @@ export interface StaffMember {
   uid: string;
   fullName: string;
   email: string;
-  role: "KITCHEN";
+  role: "KITCHEN" | "WAITER";
   isActive: boolean;
   createdAt: number;
 }

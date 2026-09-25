@@ -13,6 +13,7 @@ import {
   Unsubscribe,
   Timestamp,
   writeBatch,
+  runTransaction,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../lib/firebase";
@@ -29,6 +30,7 @@ const TIMESTAMP_FIELDS = [
   "preparingAt",
   "readyAt",
   "servedAt",
+  "paidAt",
 ] as const;
 
 function toMs(value: unknown): number | undefined {
@@ -83,137 +85,199 @@ function generateTrackingToken(): string {
  * Spark plan, where Cloud Functions cannot run). It re-validates the restaurant,
  * table/QR token and menu availability, and recomputes the total from the prices
  * stored in Firestore — the client never trusts any price it passes in.
+ *
+ * Uses a Firestore transaction for stock-tracked items to prevent race conditions:
+ * stock reads and decrements happen atomically. If two customers order the last
+ * 2 units simultaneously, only one will succeed; the other will be rejected with
+ * "only X left" and stock will never go negative. Spark plan compatible.
  */
 async function createClientOrder(
   input: CreateOrderInput
 ): Promise<{ orderId: string; trackingToken: string }> {
   const restaurantRef = doc(db, "restaurants", input.restaurantId);
-
-  const restaurantSnap = await getDoc(restaurantRef);
-  if (!restaurantSnap.exists()) {
-    throw new Error("Restaurant not found.");
-  }
-  const restaurant = restaurantSnap.data() as {
-    isActive?: boolean;
-  };
-  if (restaurant.isActive !== true) {
-    throw new Error("Restaurant is not accepting orders.");
-  }
-
-  const tableRef = doc(
-    db,
-    "restaurants",
-    input.restaurantId,
-    "tables",
-    input.tableId
-  );
-  const tableSnap = await getDoc(tableRef);
-  if (!tableSnap.exists()) {
-    throw new Error("Table not found.");
-  }
-  const table = tableSnap.data() as {
-    tableNumber?: number;
-    isActive?: boolean;
-    qrToken?: string;
-  };
-  if (table.isActive !== true || table.qrToken !== input.qrToken) {
-    console.error("[order:validation-failed]", {
-      reason:
-        table.isActive !== true
-          ? "table-inactive"
-          : "qr-token-mismatch",
-      tableIsActive: table.isActive,
-      storedQr: table.qrToken ? "present" : "(missing)",
-      providedQr: input.qrToken ? "present" : "(missing)",
-      tableId: input.tableId,
-      restaurantId: input.restaurantId,
-    });
-    throw new Error("Table is not available.");
-  }
-
-  const menuSnap = await getDocs(
-    collection(db, "restaurants", input.restaurantId, "menuItems")
-  );
-  const menuMap = new Map<string, { name?: string; price?: unknown; isAvailable?: boolean }>();
-  menuSnap.docs.forEach((d) => menuMap.set(d.id, d.data() as never));
-
-  let totalAmount = 0;
-  const orderItems: Array<{
-    menuItemId: string;
-    itemName: string;
-    price: number;
-    quantity: number;
-    specialInstruction: string;
-    restaurantId: string;
-    tableId: string;
-    qrToken: string;
-    createdAt: unknown;
-  }> = [];
-
-  const seen = new Set<string>();
-  for (const item of input.items) {
-    const qty = Math.floor(Number(item.quantity));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      throw new Error("Quantity must be greater than 0.");
-    }
-    if (seen.has(item.menuItemId)) {
-      throw new Error("Duplicate menu item in order.");
-    }
-    seen.add(item.menuItemId);
-
-    const menu = menuMap.get(item.menuItemId);
-    if (!menu || menu.isAvailable !== true) {
-      throw new Error("A menu item is no longer available.");
-    }
-    const price = Number(menu.price);
-    if (!Number.isFinite(price) || price < 0) {
-      throw new Error("A menu item has an invalid price.");
-    }
-    totalAmount += price * qty;
-    orderItems.push({
-      menuItemId: item.menuItemId,
-      itemName: menu.name || "",
-      price,
-      quantity: qty,
-      specialInstruction: (item.specialInstruction || "").slice(0, 300),
-      // Bound each item to the same table session as its parent order so the
-      // Firestore items-create rule (QR token + active table) can validate it
-      // atomically within the same batch.
-      restaurantId: input.restaurantId,
-      tableId: input.tableId,
-      qrToken: input.qrToken,
-      createdAt: serverTimestamp(),
-    });
-  }
-
-  if (orderItems.length === 0) {
-    throw new Error("Order is empty.");
-  }
-
+  const tableRef = doc(db, "restaurants", input.restaurantId, "tables", input.tableId);
   const trackingToken = generateTrackingToken();
   const orderRef = doc(orderCol(input.restaurantId));
   const now = serverTimestamp();
 
-  const batch = writeBatch(db);
-  batch.set(orderRef, {
-    restaurantId: input.restaurantId,
-    tableId: input.tableId,
-    qrToken: input.qrToken,
-    tableNumber: table.tableNumber || 0,
-    customerSessionId: generateTrackingToken(),
-    status: "PLACED",
-    totalAmount,
-    specialInstructions: (input.specialInstructions || "").slice(0, 500),
-    trackingToken,
-    createdAt: now,
-    updatedAt: now,
-  });
-  const itemsCol = collection(orderRef, "items");
-  orderItems.forEach((oi) => {
-    batch.set(doc(itemsCol), { ...oi, createdAt: serverTimestamp() });
-  });
-  await batch.commit();
+  // Pre-validate input shape before transaction (fail fast on malformed qty/duplicates)
+  if (!input.items || input.items.length === 0) throw new Error("Order is empty.");
+  const seenPre = new Set<string>();
+  for (const it of input.items) {
+    const qty = Math.floor(Number(it.quantity));
+    if (!Number.isFinite(qty) || qty <= 0) throw new Error("Quantity must be greater than 0.");
+    if (seenPre.has(it.menuItemId)) throw new Error("Duplicate menu item in order.");
+    seenPre.add(it.menuItemId);
+  }
 
+  let computed: {
+    totalAmount: number;
+    gstPercent: number;
+    gstAmount: number;
+    serviceChargePercent: number;
+    serviceChargeAmount: number;
+    grandTotal: number;
+    tableNumber: number;
+    orderItems: Array<{
+      menuItemId: string;
+      itemName: string;
+      price: number;
+      quantity: number;
+      specialInstruction: string;
+      restaurantId: string;
+      tableId: string;
+      qrToken: string;
+      createdAt: unknown;
+    }>;
+  } | null = null;
+
+  await runTransaction(db, async (tx) => {
+    const restaurantSnap = await tx.get(restaurantRef);
+    if (!restaurantSnap.exists()) throw new Error("Restaurant not found.");
+    const restaurant = restaurantSnap.data() as {
+      isActive?: boolean;
+      gstPercent?: number;
+      serviceChargePercent?: number;
+    };
+    if (restaurant.isActive !== true) throw new Error("Restaurant is not accepting orders.");
+    const gstPercent = Math.max(0, Math.min(100, Number(restaurant.gstPercent) || 0));
+    const serviceChargePercent = Math.max(0, Math.min(100, Number(restaurant.serviceChargePercent) || 0));
+
+    const tableSnap = await tx.get(tableRef);
+    if (!tableSnap.exists()) throw new Error("Table not found.");
+    const table = tableSnap.data() as {
+      tableNumber?: number;
+      isActive?: boolean;
+      qrToken?: string;
+      isAccessAvailable?: boolean;
+    };
+    if (table.isActive !== true || table.qrToken !== input.qrToken) {
+      if (import.meta.env.DEV) console.error("[order:validation-failed]", {
+        reason: table.isActive !== true ? "table-inactive" : "qr-token-mismatch",
+        tableIsActive: table.isActive,
+        storedQr: table.qrToken ? "present" : "(missing)",
+        providedQr: input.qrToken ? "present" : "(missing)",
+        tableId: input.tableId,
+        restaurantId: input.restaurantId,
+      });
+      throw new Error("Table is not available.");
+    }
+    if ((table as { isAccessAvailable?: boolean }).isAccessAvailable === false) {
+      throw new Error("Table is currently unavailable. Please contact staff.");
+    }
+
+    let totalAmount = 0;
+    const orderItems: Array<{
+      menuItemId: string;
+      itemName: string;
+      price: number;
+      quantity: number;
+      specialInstruction: string;
+      restaurantId: string;
+      tableId: string;
+      qrToken: string;
+      createdAt: unknown;
+    }> = [];
+    const seen = new Set<string>();
+    const stockUpdates: { id: string; newQty: number; docRef: ReturnType<typeof doc> }[] = [];
+
+    for (const item of input.items) {
+      const qty = Math.floor(Number(item.quantity));
+      if (seen.has(item.menuItemId)) throw new Error("Duplicate menu item in order.");
+      seen.add(item.menuItemId);
+
+      const menuRef = doc(db, "restaurants", input.restaurantId, "menuItems", item.menuItemId);
+      const menuSnap = await tx.get(menuRef);
+      if (!menuSnap.exists()) throw new Error("A menu item is no longer available.");
+      const menu = menuSnap.data() as {
+        name?: string;
+        price?: unknown;
+        isAvailable?: boolean;
+        trackStock?: boolean;
+        stockEnabled?: boolean;
+        stockQuantity?: unknown;
+        lowStockThreshold?: unknown;
+      };
+      if (menu.isAvailable !== true) throw new Error("A menu item is no longer available.");
+
+      const enabled = menu.trackStock === true || (menu as { stockEnabled?: boolean }).stockEnabled === true;
+      if (enabled) {
+        const stock = Number(menu.stockQuantity);
+        const availableStock = Number.isFinite(stock) ? stock : 0;
+        if (availableStock <= 0) throw new Error(`${menu.name || "Item"} is out of stock.`);
+        if (availableStock < qty) throw new Error(`${menu.name || "Item"} has only ${availableStock} left.`);
+        // Will decrement atomically inside same transaction, preventing negative stock
+        stockUpdates.push({
+          id: item.menuItemId,
+          newQty: availableStock - qty,
+          docRef: menuRef,
+        });
+      }
+      const price = Number(menu.price);
+      if (!Number.isFinite(price) || price < 0) throw new Error("A menu item has an invalid price.");
+      totalAmount += price * qty;
+      orderItems.push({
+        menuItemId: item.menuItemId,
+        itemName: menu.name || "",
+        price,
+        quantity: qty,
+        specialInstruction: (item.specialInstruction || "").slice(0, 300),
+        restaurantId: input.restaurantId,
+        tableId: input.tableId,
+        qrToken: input.qrToken,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    if (orderItems.length === 0) throw new Error("Order is empty.");
+
+    const gstAmount = Math.round(totalAmount * (gstPercent / 100) * 100) / 100;
+    const serviceChargeAmount = Math.round(totalAmount * (serviceChargePercent / 100) * 100) / 100;
+    const grandTotal = Math.round((totalAmount + gstAmount + serviceChargeAmount) * 100) / 100;
+
+    computed = {
+      totalAmount,
+      gstPercent,
+      gstAmount,
+      serviceChargePercent,
+      serviceChargeAmount,
+      grandTotal,
+      tableNumber: table.tableNumber || 0,
+      orderItems,
+    };
+
+    // Create order doc
+    tx.set(orderRef, {
+      restaurantId: input.restaurantId,
+      tableId: input.tableId,
+      qrToken: input.qrToken,
+      tableNumber: table.tableNumber || 0,
+      customerSessionId: generateTrackingToken(),
+      status: "PLACED",
+      totalAmount,
+      gstPercent,
+      gstAmount,
+      serviceChargePercent,
+      serviceChargeAmount,
+      grandTotal,
+      paymentStatus: "PENDING",
+      specialInstructions: (input.specialInstructions || "").slice(0, 500),
+      trackingToken,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const itemsCol = collection(orderRef, "items");
+    orderItems.forEach((oi) => {
+      tx.set(doc(itemsCol), { ...oi, createdAt: serverTimestamp() });
+    });
+    stockUpdates.forEach(({ docRef, newQty }) => {
+      const upd: Record<string, unknown> = { stockQuantity: newQty, updatedAt: serverTimestamp() };
+      if (newQty <= 0) upd.isAvailable = false;
+      tx.update(docRef, upd);
+    });
+  });
+
+  if (!computed) throw new Error("Order creation failed.");
   return { orderId: orderRef.id, trackingToken };
 }
 
@@ -226,7 +290,7 @@ async function createClientOrder(
 export async function createOrder(
   input: CreateOrderInput
 ): Promise<{ orderId: string; trackingToken: string }> {
-  console.log("[order:create-debug]", {
+  if (import.meta.env.DEV) console.log("[order:create-debug]", {
     restaurantId: input.restaurantId,
     tableId: input.tableId,
     hasQrToken: !!input.qrToken,
@@ -235,11 +299,11 @@ export async function createOrder(
   });
   try {
     const result = await createSecureOrder(input);
-    console.log("[order:create] created via secure function", result);
+    if (import.meta.env.DEV) console.log("[order:create] created via secure function", result);
     return result;
   } catch (e) {
     const err = e as { code?: string; message?: string };
-    console.warn("[order:create] secure function failed, falling back to client", {
+    if (import.meta.env.DEV) console.warn("[order:create] secure function failed, falling back to client", {
       code: err?.code ?? "unknown",
       message: err?.message ?? String(e),
     });
@@ -248,7 +312,7 @@ export async function createOrder(
       return result;
     } catch (ce) {
       const cerr = ce as { code?: string; message?: string };
-      console.error("[order:firestore-denied]", {
+      if (import.meta.env.DEV) console.error("[order:firestore-denied]", {
         code: cerr?.code ?? "unknown",
         message: cerr?.message ?? String(ce),
         path: `restaurants/${input.restaurantId}/orders/{orderId}`,
@@ -325,6 +389,69 @@ export async function updateOrderStatus(
   await updateDoc(doc(orderCol(restaurantId), orderId), update);
 }
 
+export async function markOrderPaid(restaurantId: string, orderId: string): Promise<void> {
+  // DEBUG: Read the order document before update to verify state
+  const orderRef = doc(orderCol(restaurantId), orderId);
+  const orderSnap = await getDoc(orderRef);
+
+  if (!orderSnap.exists()) {
+    throw new Error(`Order document does not exist: restaurants/${restaurantId}/orders/${orderId}`);
+  }
+
+  const orderData = orderSnap.data();
+
+  // DEBUG: Log diagnostic information
+  const auth = (await import("../lib/firebase")).auth;
+  const currentUser = auth.currentUser;
+
+  if (import.meta.env.DEV) console.log("[markOrderPaid:DIAGNOSTIC]", {
+    // Firebase project info
+    projectId: (await import("../lib/firebase")).app.options.projectId,
+    authDomain: (await import("../lib/firebase")).app.options.authDomain,
+    // Authenticated user
+    authUid: currentUser?.uid ?? "NOT_AUTHENTICATED",
+    // Request parameters
+    restaurantId,
+    orderId,
+    // Order document data
+    orderRestaurantId: orderData.restaurantId,
+    orderTableId: orderData.tableId,
+    orderStatus: orderData.status,
+    orderPaymentStatus: orderData.paymentStatus,
+    orderTotalAmount: orderData.totalAmount,
+    orderGrandTotal: orderData.grandTotal,
+    orderTableNumber: orderData.tableNumber,
+    // Expected rule conditions
+    expectedStatus: "SERVED",
+    expectedPaymentStatusNotPaid: orderData.paymentStatus !== "PAID",
+    expectedRequestedPaymentStatus: "PAID",
+  });
+
+  try {
+    await updateDoc(orderRef, {
+      paymentStatus: "PAID",
+      paidAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    if (import.meta.env.DEV) console.log("[markOrderPaid:SUCCESS]", { orderId, restaurantId });
+  } catch (error: unknown) {
+    const err = error as { code?: string; message?: string; name?: string };
+    if (import.meta.env.DEV) console.error("[markOrderPaid:FIREBASE_ERROR]", {
+      code: err?.code,
+      message: err?.message,
+      name: err?.name,
+      restaurantId,
+      orderId,
+      authUid: currentUser?.uid,
+      orderRestaurantId: orderData.restaurantId,
+      orderStatus: orderData.status,
+      orderPaymentStatus: orderData.paymentStatus,
+      orderTableId: orderData.tableId,
+    });
+    throw error;
+  }
+}
+
 export function subscribeToOrders(
   restaurantId: string,
   callback: (orders: Order[]) => void,
@@ -339,13 +466,17 @@ export function subscribeToOrders(
       limit(200)
     );
   }
-  return onSnapshot(q, (snap) => {
-    const orders = snap.docs.map((d) => ({
-      id: d.id,
-      ...normalizeOrderData(d.data()),
-    }));
-    callback(orders);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs.map((d) => ({
+        id: d.id,
+        ...normalizeOrderData(d.data()),
+      }));
+      callback(orders);
+    },
+    () => callback([])
+  );
 }
 
 export async function getTodayOrders(
@@ -366,11 +497,15 @@ export function subscribeToOrder(  restaurantId: string,
   orderId: string,
   callback: (order: Order | null) => void
 ): Unsubscribe {
-  return onSnapshot(doc(orderCol(restaurantId), orderId), (snap) => {
-    if (!snap.exists()) {
-      callback(null);
-      return;
-    }
-    callback({ id: snap.id, ...(snap.data() as Omit<Order, "id">) });
-  });
+  return onSnapshot(
+    doc(orderCol(restaurantId), orderId),
+    (snap) => {
+      if (!snap.exists()) {
+        callback(null);
+        return;
+      }
+      callback({ id: snap.id, ...normalizeOrderData(snap.data()) });
+    },
+    () => callback(null)
+  );
 }

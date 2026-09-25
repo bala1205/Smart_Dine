@@ -1,4 +1,4 @@
-export type UserRole = "OWNER" | "KITCHEN";
+export type UserRole = "OWNER" | "KITCHEN" | "WAITER";
 
 export interface UserProfile {
   uid: string;

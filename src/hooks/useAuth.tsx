@@ -23,14 +23,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(u);
       if (unsubProfile) unsubProfile();
       if (u) {
-        unsubProfile = onSnapshot(doc(db, "users", u.uid), (snap) => {
-          if (snap.exists()) {
-            setProfile({ ...(snap.data() as UserProfile), uid: snap.id });
-          } else {
+        unsubProfile = onSnapshot(
+          doc(db, "users", u.uid),
+          (snap) => {
+            if (snap.exists()) {
+              setProfile({ ...(snap.data() as UserProfile), uid: snap.id });
+            } else {
+              setProfile(null);
+            }
+            setLoading(false);
+          },
+          () => {
             setProfile(null);
+            setLoading(false);
           }
-          setLoading(false);
-        });
+        );
       } else {
         setProfile(null);
         setLoading(false);

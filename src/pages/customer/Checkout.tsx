@@ -9,6 +9,7 @@ import { getTable } from "../../services/tableService";
 import { createOrder } from "../../services/orderService";
 import { getRestaurantContext } from "../../utils/session";
 import { formatCurrency } from "../../utils/formatting";
+import { calculateBill } from "../../utils/billing";
 import { Button } from "../../components/common/Button";
 import { TextArea } from "../../components/common/Form";
 import type { Table } from "../../types/table";
@@ -32,7 +33,7 @@ export default function Checkout() {
     const token =
       new URLSearchParams(window.location.search).get("token") || ctx.qrToken || "";
     setQrToken(token);
-    console.log("[QR_SESSION] checkout session", {
+    if (import.meta.env.DEV) console.log("[QR_SESSION] checkout session", {
       restaurantId: ctx.restaurantId,
       tableId: ctx.tableId,
       hasRestaurantId: !!ctx.restaurantId,
@@ -62,6 +63,19 @@ export default function Checkout() {
     return (
       <CheckoutShell>
         <div className="text-center py-16 text-gray-500">Loading checkout...</div>
+      </CheckoutShell>
+    );
+  }
+
+  const isAccessAvailable = (table as unknown as { isAccessAvailable?: boolean })?.isAccessAvailable ?? true;
+  if (!isAccessAvailable) {
+    return (
+      <CheckoutShell>
+        <div className="text-center py-16">
+          <div className="text-5xl mb-4">🚫</div>
+          <h1 className="text-xl font-bold text-gray-800">Table Currently Unavailable</h1>
+          <p className="text-gray-600 mt-2">Please contact the restaurant staff.</p>
+        </div>
       </CheckoutShell>
     );
   }
@@ -102,7 +116,32 @@ export default function Checkout() {
   async function placeOrder() {
     if (!restaurant || !table || placing) return;
     setPlacing(true);
-    console.log("[ORDER] create started", {
+    // Stale-state guard: re-read table from Firestore so a disable that happened
+    // after the menu was opened is not bypassed by cached state.
+    try {
+      const freshTable = await getTable(restaurant.id, table.id);
+      if (!freshTable || freshTable.isActive !== true) {
+        toast.error("This table is no longer available.");
+        setPlacing(false);
+        return;
+      }
+      if ((freshTable as unknown as { isAccessAvailable?: boolean }).isAccessAvailable === false) {
+        toast.error("This table is currently unavailable. Please contact staff.");
+        setPlacing(false);
+        return;
+      }
+      if (freshTable.qrToken !== qrToken) {
+        toast.error("Your table session has expired. Please rescan the QR code.");
+        setPlacing(false);
+        return;
+      }
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("[checkout] table re-validation failed", e);
+      toast.error("Unable to verify table. Please rescan the QR code.");
+      setPlacing(false);
+      return;
+    }
+    if (import.meta.env.DEV) console.log("[ORDER] create started", {
       restaurantId: restaurant.id,
       tableId: table.id,
       hasQrToken: !!qrToken,
@@ -120,12 +159,12 @@ export default function Checkout() {
         })),
         specialInstructions: instructions,
       });
-      console.log("[ORDER] create success", { orderId, hasTrackingToken: !!trackingToken });
+      if (import.meta.env.DEV) console.log("[ORDER] create success", { orderId, hasTrackingToken: !!trackingToken });
       clear();
       navigate(`/order/${orderId}?token=${trackingToken}`);
     } catch (e: unknown) {
       const err = e as { code?: string; message?: string };
-      console.error("[ORDER] create failed", {
+      if (import.meta.env.DEV) console.error("[ORDER] create failed", {
         code: err?.code ?? "unknown",
         message: err?.message ?? String(e),
         restaurantId: restaurant.id,
@@ -197,16 +236,33 @@ export default function Checkout() {
         />
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4 mb-4 space-y-1">
-        <div className="flex justify-between text-sm text-gray-600">
-          <span>Subtotal</span>
-          <span>{formatCurrency(total)}</span>
-        </div>
-        <div className="flex justify-between text-base font-bold text-gray-900">
-          <span>Total</span>
-          <span>{formatCurrency(total)}</span>
-        </div>
-      </div>
+      {(() => {
+        const bill = calculateBill(total, restaurant.gstPercent ?? 0, restaurant.serviceChargePercent ?? 0);
+        return (
+          <div className="bg-white rounded-xl shadow-sm p-4 mb-4 space-y-1">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>Subtotal</span>
+              <span>{formatCurrency(bill.subtotal)}</span>
+            </div>
+            {bill.gstAmount > 0 && (
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>GST {bill.gstPercent}%</span>
+                <span>{formatCurrency(bill.gstAmount)}</span>
+              </div>
+            )}
+            {bill.serviceChargeAmount > 0 && (
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>Service Charge {bill.serviceChargePercent}%</span>
+                <span>{formatCurrency(bill.serviceChargeAmount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-100 pt-2 mt-2">
+              <span>Grand Total</span>
+              <span>{formatCurrency(bill.grandTotal)}</span>
+            </div>
+          </div>
+        );
+      })()}
 
       <Button onClick={placeOrder} loading={placing} className="w-full py-3 text-base">
         {placing ? "Placing Order..." : "Place Order"}

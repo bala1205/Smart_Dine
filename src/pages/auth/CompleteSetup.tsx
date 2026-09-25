@@ -90,7 +90,7 @@ export default function CompleteSetup() {
       navigate("/owner/dashboard");
     } catch (err: unknown) {
       const wrapped = err as { code?: string; message?: string };
-      console.error("[complete-setup] failed. code:", wrapped?.code, "message:", wrapped?.message);
+      if (import.meta.env.DEV) console.error("[complete-setup] failed. code:", wrapped?.code, "message:", wrapped?.message);
       toast.error("Unable to complete setup. Please try again.");
     } finally {
       setLoading(false);

@@ -110,46 +110,46 @@ export default function OwnerDashboard() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         {cards.map((card) => (
-          <div key={card.label} className="bg-white rounded-xl shadow-sm p-4">
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${card.color}`}>
+          <div key={card.label} className="bg-white rounded-2xl border border-surface-200 p-5 shadow-card hover-lift">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-4 ${card.color}`}>
               <card.icon className="w-5 h-5" />
             </div>
             {card.loading ? (
-              <Skeleton className="h-6 w-16" />
+              <Skeleton className="h-7 w-16" />
             ) : (
-              <div className="text-xl font-bold text-gray-800">{card.value ?? "0"}</div>
+              <div className="text-2xl font-bold tracking-tight text-ink-900">{card.value ?? "0"}</div>
             )}
-            <div className="text-xs text-gray-500 mt-1">{card.label}</div>
+            <div className="text-xs font-medium text-ink-500 mt-1 tracking-wide">{card.label}</div>
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Live Orders</h2>
-          <Link to="/owner/orders" className="text-sm text-brand-600 hover:underline">
-            View all
+      <div className="bg-white rounded-2xl border border-surface-200 shadow-card">
+        <div className="px-6 py-4 border-b border-surface-100 flex items-center justify-between">
+          <h2 className="font-bold tracking-tight text-ink-900">Live Orders</h2>
+          <Link to="/owner/orders" className="text-sm font-semibold text-brand-600 hover:text-brand-700">
+            View all →
           </Link>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-6">
           {["PLACED", "PREPARING", "READY"].map((s) => (
-            <div key={s} className="bg-gray-50 rounded-lg p-3">
-              <div className="text-xs font-semibold text-gray-500 uppercase mb-2">{s}</div>
+            <div key={s} className="bg-surface-50 rounded-xl p-4 border border-surface-200">
+              <div className="text-[11px] font-bold tracking-widest uppercase text-ink-400 mb-3">{s}</div>
               {recent.length === 0 ? (
-                <p className="text-sm text-gray-400">No orders</p>
+                <p className="text-sm text-ink-400">No orders</p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {recent
                     .filter((o) => o.status === s)
                     .slice(0, 4)
                     .map((o) => (
-                      <div key={o.id} className="text-sm flex justify-between">
-                        <span className="font-medium text-gray-700">Table {o.tableNumber}</span>
-                        <span className="text-gray-500">{formatCurrency(o.totalAmount)}</span>
+                      <div key={o.id} className="text-sm flex justify-between items-center bg-white rounded-lg px-3 py-2 border border-surface-200">
+                        <span className="font-semibold text-ink-700">Table {o.tableNumber}</span>
+                        <span className="font-medium text-ink-900">{formatCurrency(o.totalAmount)}</span>
                       </div>
                     ))}
                   {recent.filter((o) => o.status === s).length === 0 && (
-                    <p className="text-sm text-gray-400">None</p>
+                    <p className="text-sm text-ink-400">None</p>
                   )}
                 </div>
               )}
@@ -158,36 +158,38 @@ export default function OwnerDashboard() {
         </div>
       </div>
 
-      <div className="mt-6">
-        <h2 className="font-semibold text-gray-800 mb-3">Recent Orders</h2>
+      <div className="mt-8">
+        <h2 className="font-bold tracking-tight text-ink-900 mb-4">Recent Orders</h2>
         {recent.length === 0 ? (
           <EmptyState title="No orders yet" description="Customer orders will show up here in real time." />
         ) : (
-          <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Order</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Table</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Time</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {recent.map((o) => (
-                  <tr key={o.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono font-medium text-gray-800">
-                      #{o.id.slice(-4).toUpperCase()}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{o.tableNumber}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{formatCurrency(o.totalAmount)}</td>
-                    <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
-                    <td className="px-4 py-3 text-gray-500">{formatTime(o.createdAt)}</td>
+          <div className="bg-white rounded-2xl border border-surface-200 shadow-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-surface-100 text-sm">
+                <thead className="bg-surface-50">
+                  <tr>
+                    <th className="px-6 py-3.5 text-left text-[11px] font-bold tracking-widest uppercase text-ink-400">Order</th>
+                    <th className="px-6 py-3.5 text-left text-[11px] font-bold tracking-widest uppercase text-ink-400">Table</th>
+                    <th className="px-6 py-3.5 text-left text-[11px] font-bold tracking-widest uppercase text-ink-400">Amount</th>
+                    <th className="px-6 py-3.5 text-left text-[11px] font-bold tracking-widest uppercase text-ink-400">Status</th>
+                    <th className="px-6 py-3.5 text-left text-[11px] font-bold tracking-widest uppercase text-ink-400">Time</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-surface-100">
+                  {recent.map((o) => (
+                    <tr key={o.id} className="hover:bg-surface-50 transition-colors">
+                      <td className="px-6 py-4 font-mono font-bold text-ink-900">
+                        #{o.id.slice(-4).toUpperCase()}
+                      </td>
+                      <td className="px-6 py-4 text-ink-600 font-medium">Table {o.tableNumber}</td>
+                      <td className="px-6 py-4 font-bold text-ink-900">{formatCurrency(o.totalAmount)}</td>
+                      <td className="px-6 py-4"><StatusBadge status={o.status} /></td>
+                      <td className="px-6 py-4 text-ink-500">{formatTime(o.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

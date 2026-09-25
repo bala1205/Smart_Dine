@@ -74,9 +74,14 @@ export async function addMenuItem(
   data: Omit<MenuItem, "id" | "createdAt" | "updatedAt">
 ) {
   const ref = doc(itemCol(restaurantId));
+  const enabled = (data as unknown as { stockEnabled?: boolean }).stockEnabled ?? data.trackStock ?? false;
   return setDoc(ref, {
     ...data,
     isAvailable: data.isAvailable ?? true,
+    trackStock: enabled,
+    stockEnabled: enabled,
+    stockQuantity: enabled ? Number(data.stockQuantity) || 0 : 0,
+    lowStockThreshold: enabled ? Number(data.lowStockThreshold) || 5 : 5,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
