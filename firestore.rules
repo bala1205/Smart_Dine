@@ -108,10 +108,57 @@ service cloud.firestore {
       }
 
       // ---------- Tables ----------
+      // Single-session occupancy claims live on the table doc (occupiedBy +
+      // currentOrderId). Guests may ONLY touch those two fields, and only as
+      // part of a QR-validated order creation (see validGuestTableClaim).
+      // NOTE: rules functions must be single `return` expressions, and the
+      // deployed engine rejects `? null : <resource>` ternaries (static
+      // "invalid type null vs map" becomes a runtime deny), so missing-doc
+      // probes use a sentinel ID that can never exist (underscores never
+      // appear in auto-IDs) instead of a null literal.
+      function oldClaimTerminal(old) {
+        // A previous claim is terminal (safe to overwrite) when it points at
+        // a finished order, or at nothing at all (stale/dangling reference).
+        // NOTE: dot-access on a MISSING field errors in this engine, so every
+        // optional field is guarded by `in` first.
+        let hasOid = ('currentOrderId' in old) && (old.currentOrderId is string) && old.currentOrderId.size() > 0;
+        let oid = hasOid ? old.currentOrderId : '___no_such_order___';
+        let o = get(/databases/$(database)/documents/restaurants/$(restaurantId)/orders/$(oid));
+        return !hasOid || o == null
+          || o.data.status == 'CANCELLED'
+          || (o.data.status == 'SERVED' && o.data.paymentStatus == 'PAID');
+      }
+
+      function validGuestTableClaim(tableId) {
+        let old = resource.data;
+        let nw = request.resource.data;
+        let hasNoid = ('currentOrderId' in nw) && (nw.currentOrderId is string) && nw.currentOrderId.size() > 0;
+        let noid = hasNoid ? nw.currentOrderId : '___no_such_order___';
+        // The new claim must reference a real PLACED order for THIS table,
+        // created with this table's QR secret (post-transaction state, so the
+        // order created in the same transaction counts).
+        let ord = getAfter(/databases/$(database)/documents/restaurants/$(restaurantId)/orders/$(noid));
+        let hasOcc = ('occupiedBy' in old) && (old.occupiedBy is string) && old.occupiedBy.size() > 0;
+        let hasNewOcc = ('occupiedBy' in nw) && (nw.occupiedBy is string) && nw.occupiedBy.size() > 0;
+        let sameSession = hasOcc && hasNewOcc && nw.occupiedBy == old.occupiedBy;
+        // Only the claim fields (plus timestamp) may change; QR token itself is untouched.
+        // Then: fresh claim, same-session extension, or overwriting a terminal claim.
+        return nw.diff(old).affectedKeys().hasOnly(['occupiedBy', 'currentOrderId', 'updatedAt'])
+          && hasNewOcc
+          && hasNoid
+          && ('qrToken' in nw) && ('qrToken' in old) && nw.qrToken == old.qrToken
+          && ord != null
+          && ord.data.tableId == tableId
+          && ord.data.status == 'PLACED'
+          && ord.data.qrToken == old.qrToken
+          && (!hasOcc || sameSession || oldClaimTerminal(old));
+      }
+
       match /tables/{tableId} {
         // Public can read active tables to validate QR on the menu page.
         allow read: if true;
-        allow create, update, delete: if isOwnerOf(restaurantId);
+        allow create, delete: if isOwnerOf(restaurantId);
+        allow update: if isOwnerOf(restaurantId) || validGuestTableClaim(tableId);
       }
 
       // ---------- Staff ----------

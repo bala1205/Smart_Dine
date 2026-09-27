@@ -183,7 +183,11 @@ export default function Checkout() {
       });
       const code = (err?.code || "").toLowerCase();
       const msg = (err?.message || "").toLowerCase();
-      if (code.includes("permission") || code.includes("denied") || code === "firestore/permission-denied") {
+      if (msg.includes("table_occupied") || msg.includes("currently occupied")) {
+        toast.error(
+          `Table ${table.tableNumber} is currently occupied. Please wait until the current order is completed and payment is confirmed.`
+        );
+      } else if (code.includes("permission") || code.includes("denied") || code === "firestore/permission-denied") {
         toast.error("Unable to place order. Your table session may have expired. Please rescan the QR code.");
       } else if (code === "not-found" || code === "firestore/not-found") {
         toast.error("The restaurant or table is no longer available.");

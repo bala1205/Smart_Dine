@@ -9,6 +9,7 @@ import {
   orderBy,
   limit,
   serverTimestamp,
+  deleteField,
   onSnapshot,
   Unsubscribe,
   Timestamp,
@@ -19,6 +20,20 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../lib/firebase";
 import type { Order, OrderStatus, OrderItem } from "../types/order";
 import { VALID_ORDER_TRANSITIONS } from "../types/order";
+import { getOrCreateSessionId } from "../utils/session";
+
+/** Order is still being worked/awaiting payment → table claim stays live. */
+function isLiveClaimOrder(data: {
+  status?: unknown;
+  paymentStatus?: unknown;
+}): boolean {
+  if (data.status === "PLACED" || data.status === "PREPARING" || data.status === "READY") return true;
+  if (data.status === "SERVED" && data.paymentStatus !== "PAID") return true;
+  return false;
+}
+
+export const TABLE_OCCUPIED_ERROR =
+  "TABLE_OCCUPIED: This table already has an active order. Please wait until the current order is completed and payment is confirmed.";
 
 function orderCol(restaurantId: string) {
   return collection(db, "restaurants", restaurantId, "orders");
@@ -58,6 +73,8 @@ export interface CreateOrderInput {
   restaurantId: string;
   tableId: string;
   qrToken: string;
+  /** Stable browser session claiming the table. Defaults to the stored customer session. */
+  customerSessionId?: string;
   items: { menuItemId: string; quantity: number; specialInstruction: string }[];
   specialInstructions: string;
 }
@@ -99,6 +116,9 @@ async function createClientOrder(
   const trackingToken = generateTrackingToken();
   const orderRef = doc(orderCol(input.restaurantId));
   const now = serverTimestamp();
+  // Stable per-browser session used for the single-session table claim.
+  // (Order.customerSessionId below keeps its existing per-order token.)
+  const claimSessionId = input.customerSessionId || getOrCreateSessionId();
 
   // Pre-validate input shape before transaction (fail fast on malformed qty/duplicates)
   if (!input.items || input.items.length === 0) throw new Error("Order is empty.");
@@ -150,6 +170,8 @@ async function createClientOrder(
       isActive?: boolean;
       qrToken?: string;
       isAccessAvailable?: boolean;
+      occupiedBy?: unknown;
+      currentOrderId?: unknown;
     };
     if (table.isActive !== true || table.qrToken !== input.qrToken) {
       if (import.meta.env.DEV) console.error("[order:validation-failed]", {
@@ -164,6 +186,35 @@ async function createClientOrder(
     }
     if ((table as { isAccessAvailable?: boolean }).isAccessAvailable === false) {
       throw new Error("Table is currently unavailable. Please contact staff.");
+    }
+
+    // Single-session occupancy: a live claim by another session blocks a new
+    // independent order. Same-session re-orders and stale/finished claims pass.
+    // This check runs INSIDE the transaction so competing scans serialize.
+    const claimedBy =
+      typeof table.occupiedBy === "string" && table.occupiedBy.length > 0
+        ? table.occupiedBy
+        : null;
+    const claimedOrderId =
+      typeof table.currentOrderId === "string" && table.currentOrderId.length > 0
+        ? table.currentOrderId
+        : null;
+    if (claimedBy && claimedBy !== claimSessionId) {
+      let claimLive = true;
+      if (claimedOrderId) {
+        try {
+          const claimSnap = await tx.get(
+            doc(db, "restaurants", input.restaurantId, "orders", claimedOrderId)
+          );
+          claimLive =
+            claimSnap.exists() &&
+            isLiveClaimOrder(claimSnap.data() as { status?: unknown; paymentStatus?: unknown });
+        } catch {
+          // Fail closed: if the claim cannot be verified, treat as occupied.
+          claimLive = true;
+        }
+      }
+      if (claimLive) throw new Error(TABLE_OCCUPIED_ERROR);
     }
 
     let totalAmount = 0;
@@ -270,6 +321,13 @@ async function createClientOrder(
     orderItems.forEach((oi) => {
       tx.set(doc(itemsCol), { ...oi, createdAt: serverTimestamp() });
     });
+    // Claim the table in the SAME transaction as order creation so two
+    // near-simultaneous scans cannot both win (transaction retries serialize).
+    tx.update(tableRef, {
+      occupiedBy: claimSessionId,
+      currentOrderId: orderRef.id,
+      updatedAt: serverTimestamp(),
+    });
     stockUpdates.forEach(({ docRef, newQty }) => {
       const upd: Record<string, unknown> = { stockQuantity: newQty, updatedAt: serverTimestamp() };
       if (newQty <= 0) upd.isAvailable = false;
@@ -290,15 +348,21 @@ async function createClientOrder(
 export async function createOrder(
   input: CreateOrderInput
 ): Promise<{ orderId: string; trackingToken: string }> {
+  // Attach the stable browser session so BOTH order paths (Cloud Function and
+  // client fallback) enforce the same single-session table claim.
+  const withSession: CreateOrderInput = {
+    ...input,
+    customerSessionId: input.customerSessionId || getOrCreateSessionId(),
+  };
   if (import.meta.env.DEV) console.log("[order:create-debug]", {
-    restaurantId: input.restaurantId,
-    tableId: input.tableId,
-    hasQrToken: !!input.qrToken,
-    itemCount: input.items.length,
+    restaurantId: withSession.restaurantId,
+    tableId: withSession.tableId,
+    hasQrToken: !!withSession.qrToken,
+    itemCount: withSession.items.length,
     status: "PLACED",
   });
   try {
-    const result = await createSecureOrder(input);
+    const result = await createSecureOrder(withSession);
     if (import.meta.env.DEV) console.log("[order:create] created via secure function", result);
     return result;
   } catch (e) {
@@ -308,17 +372,17 @@ export async function createOrder(
       message: err?.message ?? String(e),
     });
     try {
-      const result = await createClientOrder(input);
+      const result = await createClientOrder(withSession);
       return result;
     } catch (ce) {
       const cerr = ce as { code?: string; message?: string };
       if (import.meta.env.DEV) console.error("[order:firestore-denied]", {
         code: cerr?.code ?? "unknown",
         message: cerr?.message ?? String(ce),
-        path: `restaurants/${input.restaurantId}/orders/{orderId}`,
-        restaurantId: input.restaurantId,
-        tableId: input.tableId,
-        hasQrToken: !!input.qrToken,
+        path: `restaurants/${withSession.restaurantId}/orders/{orderId}`,
+        restaurantId: withSession.restaurantId,
+        tableId: withSession.tableId,
+        hasQrToken: !!withSession.qrToken,
       });
       throw ce;
     }
@@ -387,6 +451,47 @@ export async function updateOrderStatus(
     update[statusTimestampField] = serverTimestamp();
   }
   await updateDoc(doc(orderCol(restaurantId), orderId), update);
+  // A cancelled order is terminal: release the table claim so the table frees
+  // up. Best-effort (callers are staff roles; terminal-order overwrite is the
+  // backstop if this write is denied or fails).
+  if (newStatus === "CANCELLED") {
+    try {
+      const snap = await getDoc(doc(orderCol(restaurantId), orderId));
+      const tableId = snap.exists()
+        ? (snap.data() as { tableId?: unknown }).tableId
+        : undefined;
+      if (typeof tableId === "string" && tableId.length > 0) {
+        await releaseTableClaim(restaurantId, tableId, orderId);
+      }
+    } catch (releaseErr) {
+      if (import.meta.env.DEV) console.warn("[updateOrderStatus:release-skipped]", releaseErr);
+    }
+  }
+}
+
+/**
+ * Releases a table's occupancy claim, but ONLY if the claim still points at
+ * the given order (never clears a newer claim). Missing fields = no-op, so
+ * pre-claim table documents keep working. Best-effort: callers swallow
+ * failures because a paid/cancelled order is terminal and the next claim
+ * overwrites stale claims anyway.
+ */
+export async function releaseTableClaim(
+  restaurantId: string,
+  tableId: string,
+  orderId: string
+): Promise<boolean> {
+  const tableRef = doc(db, "restaurants", restaurantId, "tables", tableId);
+  const snap = await getDoc(tableRef);
+  if (!snap.exists()) return false;
+  const data = snap.data() as { currentOrderId?: unknown };
+  if (data.currentOrderId !== orderId) return false;
+  await updateDoc(tableRef, {
+    occupiedBy: deleteField(),
+    currentOrderId: deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+  return true;
 }
 
 export async function markOrderPaid(restaurantId: string, orderId: string): Promise<void> {
@@ -434,6 +539,14 @@ export async function markOrderPaid(restaurantId: string, orderId: string): Prom
       updatedAt: serverTimestamp(),
     });
     if (import.meta.env.DEV) console.log("[markOrderPaid:SUCCESS]", { orderId, restaurantId });
+    // OCCUPIED → AVAILABLE: release the table claim now that payment is done.
+    // Terminal-order overwrite covers the failure case, so never fail payment.
+    try {
+      const tableId = orderData.tableId as string | undefined;
+      if (tableId) await releaseTableClaim(restaurantId, tableId, orderId);
+    } catch (releaseErr) {
+      if (import.meta.env.DEV) console.warn("[markOrderPaid:release-skipped]", releaseErr);
+    }
   } catch (error: unknown) {
     const err = error as { code?: string; message?: string; name?: string };
     if (import.meta.env.DEV) console.error("[markOrderPaid:FIREBASE_ERROR]", {

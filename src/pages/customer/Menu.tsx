@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Search, Plus, Minus, ShoppingBag, X, UtensilsCrossed, TriangleAlert, PauseCircle, QrCode, SearchX } from "lucide-react";
+import { Search, Plus, Minus, ShoppingBag, X, UtensilsCrossed, TriangleAlert, PauseCircle, QrCode, SearchX, Lock } from "lucide-react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../lib/firebase";
 import { useRestaurant } from "../../hooks/useRestaurant";
 import { useMenu } from "../../hooks/useMenu";
 import { getTable } from "../../services/tableService";
 import { useCart } from "../../context/CartContext";
 import { formatCurrency } from "../../utils/formatting";
-import { setRestaurantContext } from "../../utils/session";
+import { getOrCreateSessionId, setRestaurantContext } from "../../utils/session";
 import type { Table } from "../../types/table";
 import { PageLoader } from "../../components/common/Spinner";
 import { ErrorState, EmptyState } from "../../components/common/States";
@@ -18,7 +20,7 @@ export default function CustomerMenu() {
   const { restaurantId = "", tableId = "" } = useParams();
   const token = new URLSearchParams(window.location.search).get("token") || "";
   const [table, setTable] = useState<Table | null>(null);
-  const [invalid, setInvalid] = useState<false | "loading" | "table" | "restaurant" | "access">("loading");
+  const [invalid, setInvalid] = useState<false | "loading" | "table" | "restaurant" | "access" | "occupied">("loading");
   const [activeCat, setActiveCat] = useState<string>("all");
   const [query, setQuery] = useState("");
 
@@ -42,11 +44,14 @@ export default function CustomerMenu() {
       return;
     }
     getTable(restaurantId, tableId)
-      .then((t) => {
+      .then(async (t) => {
         if (!t || !t.isActive || t.qrToken !== token) {
           setInvalid("table");
         } else if ((t as unknown as { isAccessAvailable?: boolean }).isAccessAvailable === false) {
           setInvalid("access");
+        } else if (await isClaimedByAnotherSession(restaurantId, t)) {
+          setTable(t);
+          setInvalid("occupied");
         } else {
           setTable(t);
           setInvalid(false);
@@ -90,6 +95,31 @@ export default function CustomerMenu() {
           </div>
           <h1 className="text-xl font-bold tracking-tight text-ink-900">Table currently unavailable</h1>
           <p className="text-sm text-ink-500 mt-2 leading-relaxed">Please contact the restaurant staff for assistance.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (invalid === "occupied") {
+    return (
+      <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
+        <div className="text-center max-w-sm bg-white rounded-2xl border border-surface-200 shadow-card p-8">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+            <Lock className="w-7 h-7 text-amber-600" strokeWidth={1.75} />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900">
+            Table {table?.tableNumber ?? ""} is currently occupied
+          </h1>
+          <p className="text-sm text-ink-500 mt-2 leading-relaxed">
+            This table already has an active order. Please wait until the current
+            order is completed and payment is confirmed.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="pressable mt-5 px-4 py-2.5 min-h-[42px] bg-ink-900 text-white rounded-xl text-sm font-semibold hover:bg-ink-700"
+          >
+            Check again
+          </button>
         </div>
       </div>
     );
@@ -339,7 +369,7 @@ export default function CustomerMenu() {
         </div>
       )}
 
-      <CartDrawer />
+      <CartDrawer menuItems={items} />
     </div>
   );
 }
@@ -397,10 +427,61 @@ function NfcHint({
   );
 }
 
-function CartDrawer() {
+/**
+ * True when the table holds a LIVE occupancy claim from another browser
+ * session. Stale/finished/missing claims read as free so tables never strand.
+ * Fail-closed: an unverifiable claim blocks with the occupied message.
+ */
+async function isClaimedByAnotherSession(
+  restaurantId: string,
+  table: Table
+): Promise<boolean> {
+  const mine = getOrCreateSessionId();
+  if (!table.occupiedBy || table.occupiedBy === mine) return false;
+  if (!table.currentOrderId) return false;
+  try {
+    const snap = await getDoc(
+      doc(db, "restaurants", restaurantId, "orders", table.currentOrderId)
+    );
+    if (!snap.exists()) return false;
+    const d = snap.data() as { status?: unknown; paymentStatus?: unknown };
+    return (
+      d.status === "PLACED" ||
+      d.status === "PREPARING" ||
+      d.status === "READY" ||
+      (d.status === "SERVED" && d.paymentStatus !== "PAID")
+    );
+  } catch {
+    return true;
+  }
+}
+
+function CartDrawer({ menuItems }: { menuItems: import("../../types/menu").MenuItem[] }) {
   const { isOpen, setOpen, lines, total, count, setQuantity, remove, setInstruction } = useCart();
   const navigate = useNavigate();
   const [showInstructions, setShowInstructions] = useState<string | null>(null);
+
+  // Realtime availability sync: the menu snapshot updates live via useMenu,
+  // so flag cart lines whose item was disabled or sold out after being added.
+  const unavailableIds = useMemo(() => {
+    const byId = new Map(menuItems.map((m) => [m.id, m]));
+    const flagged = new Set<string>();
+    for (const line of lines) {
+      const item = byId.get(line.menuItemId);
+      if (!item) {
+        flagged.add(line.menuItemId); // removed from menu
+        continue;
+      }
+      if (item.isAvailable === false) {
+        flagged.add(line.menuItemId);
+        continue;
+      }
+      const track = item.trackStock === true || item.stockEnabled === true;
+      if (track && Number(item.stockQuantity) <= 0) flagged.add(line.menuItemId);
+    }
+    return flagged;
+  }, [lines, menuItems]);
+  const hasUnavailable = unavailableIds.size > 0;
 
   return (
     <div className={`fixed inset-0 z-50 ${isOpen ? "" : "pointer-events-none"}`} role="dialog" aria-modal={isOpen || undefined} aria-label="Shopping cart" aria-hidden={!isOpen}>
@@ -432,11 +513,18 @@ function CartDrawer() {
               <EmptyState icon={ShoppingBag} compact title="Your cart is empty" description="Add dishes from the menu to get started." />
             </div>
           )}
-          {lines.map((line) => (
-            <div key={line.menuItemId} className="bg-surface-50 border border-surface-200 rounded-2xl p-3.5">
+          {lines.map((line) => {
+            const isUnavailable = unavailableIds.has(line.menuItemId);
+            return (
+            <div key={line.menuItemId} className={`border rounded-2xl p-3.5 ${isUnavailable ? "bg-amber-50/60 border-amber-200" : "bg-surface-50 border-surface-200"}`}>
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-[14px] text-ink-900 truncate">{line.name}</div>
                 <div className="text-[13px] font-semibold text-brand-700 tabular-nums mt-0.5">{formatCurrency(line.price)}</div>
+                {isUnavailable && (
+                  <p role="alert" className="mt-1.5 text-xs font-semibold text-amber-700">
+                    This item is no longer available. Remove it to continue.
+                  </p>
+                )}
                 <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                   <button
                     onClick={() => setQuantity(line.menuItemId, line.quantity - 1)}
@@ -479,7 +567,8 @@ function CartDrawer() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
         <div className="px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-surface-100 space-y-2.5 bg-white">
           <div className="flex justify-between text-sm text-ink-500">
@@ -490,12 +579,17 @@ function CartDrawer() {
             <span>Total</span>
             <span className="tabular-nums">{formatCurrency(total)}</span>
           </div>
+          {hasUnavailable && lines.length > 0 && (
+            <p role="alert" className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+              Remove unavailable items to continue to checkout.
+            </p>
+          )}
           <button
             onClick={() => {
               setOpen(false);
               navigate("/checkout");
             }}
-            disabled={lines.length === 0}
+            disabled={lines.length === 0 || hasUnavailable}
             className="pressable block w-full bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white text-center py-3 min-h-[48px] rounded-xl font-semibold text-[15px] shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Proceed to checkout

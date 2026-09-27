@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
+import { doc, collection, getDocs, onSnapshot } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useRestaurant } from "../../hooks/useRestaurant";
-import { formatCurrency, formatDate } from "../../utils/formatting";
+import { formatCurrency, formatDate, formatTime } from "../../utils/formatting";
 import { escapeHtml } from "../../utils/sanitize";
 import { calculateBill } from "../../utils/billing";
 import { PageLoader } from "../../components/common/Spinner";
@@ -122,20 +122,39 @@ export default function DigitalBill() {
   useEffect(() => {
     if (!restaurantId || !orderId) return;
     setLoading(true);
-    Promise.all([
-      getDoc(doc(db, "restaurants", restaurantId, "orders", orderId)),
-      getDocs(collection(db, "restaurants", restaurantId, "orders", orderId, "items")),
-    ])
-      .then(([oSnap, iSnap]) => {
-        if (oSnap.exists()) setOrder({ id: oSnap.id, ...(oSnap.data() as Omit<Order, "id">) } as Order);
-        else setOrder(null);
+    // Items are fixed at order time: one-time read. The ORDER doc uses a
+    // realtime listener so payment status (Mark as Paid) updates live without
+    // refresh — a single listener, no duplicates.
+    getDocs(collection(db, "restaurants", restaurantId, "orders", orderId, "items"))
+      .then((iSnap) => {
         setItems(iSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<OrderItem, "id">) })));
       })
-      .catch(() => {
+      .catch(() => setItems([]));
+    const unsub = onSnapshot(
+      doc(db, "restaurants", restaurantId, "orders", orderId),
+      (oSnap) => {
+        if (oSnap.exists()) {
+          const data = oSnap.data() as Omit<Order, "id">;
+          setOrder({
+            id: oSnap.id,
+            ...data,
+            paidAt:
+              typeof data.paidAt === "number"
+                ? data.paidAt
+                : (data.paidAt as unknown as { toMillis?: () => number })?.toMillis?.() ??
+                  undefined,
+          } as Order);
+        } else {
+          setOrder(null);
+        }
+        setLoading(false);
+      },
+      () => {
         setOrder(null);
-        setItems([]);
-      })
-      .finally(() => setLoading(false));
+        setLoading(false);
+      }
+    );
+    return () => unsub();
   }, [restaurantId, orderId]);
 
   if (loading) return <div className="min-h-screen bg-surface-50 flex items-center justify-center"><PageLoader label="Loading bill..." /></div>;
@@ -172,7 +191,8 @@ export default function DigitalBill() {
         <p class="muted">${escapeHtml(restaurant?.address || "")} ${restaurant?.phone ? "• " + escapeHtml(restaurant.phone) : ""}</p>
         <p><strong>Table:</strong> ${escapeHtml(String(currentOrder.tableNumber))} &nbsp; <strong>Order:</strong> #${escapeHtml(currentOrder.id.slice(-4).toUpperCase())}<br/>
         <strong>Date:</strong> ${escapeHtml(formatDate(currentOrder.createdAt))}<br/>
-        <strong>Status:</strong> ${escapeHtml(currentOrder.status)}</p>
+        <strong>Status:</strong> ${escapeHtml(currentOrder.status)}<br/>
+        <strong>Payment:</strong> ${escapeHtml(currentOrder.paymentStatus === "PAID" ? "PAID" : "PENDING")}</p>
         <table><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>
         ${items.map((it) => `<tr><td>${escapeHtml(it.itemName)}</td><td>${escapeHtml(String(it.quantity))}</td><td>${escapeHtml(formatCurrency(it.price))}</td><td>${escapeHtml(formatCurrency(it.price * it.quantity))}</td></tr>`).join("")}
         </tbody></table>
@@ -250,6 +270,30 @@ export default function DigitalBill() {
             <div className="flex justify-between text-ink-500"><span>GST {bill.gstPercent}%</span><span className="font-medium text-ink-900 tabular-nums">{formatCurrency(bill.gstAmount)}</span></div>
             <div className="flex justify-between text-ink-500"><span>Service charge {bill.serviceChargePercent}%</span><span className="font-medium text-ink-900 tabular-nums">{formatCurrency(bill.serviceChargeAmount)}</span></div>
             <div className="flex justify-between text-[15px] font-bold text-ink-900 border-t border-surface-200 pt-2.5 mt-2"><span>Total</span><span className="tabular-nums">{formatCurrency(bill.grandTotal)}</span></div>
+          </div>
+
+          <div
+            role="status"
+            aria-live="polite"
+            className={`mt-4 rounded-2xl border p-3.5 text-center ${
+              currentOrder.paymentStatus === "PAID"
+                ? "bg-green-50 border-green-200"
+                : "bg-amber-50 border-amber-200"
+            }`}
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-500">Payment status</p>
+            {currentOrder.paymentStatus === "PAID" ? (
+              <>
+                <p className="mt-1 text-[15px] font-bold tracking-tight text-green-700">Paid</p>
+                {currentOrder.paidAt != null && (
+                  <p className="mt-0.5 text-xs text-green-700 tabular-nums">
+                    Paid at {formatTime(currentOrder.paidAt)} • {formatDate(currentOrder.paidAt)}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="mt-1 text-[15px] font-bold tracking-tight text-amber-700">Payment pending</p>
+            )}
           </div>
 
           <p className="text-xs text-ink-400 text-center mt-4">Thank you for dining with us.</p>

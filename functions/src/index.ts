@@ -108,6 +108,46 @@ export const createSecureOrder = functions.https.onCall(
         throw new functions.https.HttpsError("failed-precondition", "Table is currently unavailable.");
       }
 
+      // Single-session occupancy (admin SDK bypasses rules, so enforce here):
+      // a live claim by another session blocks a new independent order.
+      const claimSessionId =
+        typeof data.customerSessionId === "string" && data.customerSessionId.length > 0
+          ? data.customerSessionId
+          : randomToken();
+      const tableTx = tableSnapTx.data()!;
+      const claimedBy =
+        typeof tableTx.occupiedBy === "string" && tableTx.occupiedBy.length > 0
+          ? (tableTx.occupiedBy as string)
+          : null;
+      const claimedOrderId =
+        typeof tableTx.currentOrderId === "string" && tableTx.currentOrderId.length > 0
+          ? (tableTx.currentOrderId as string)
+          : null;
+      if (claimedBy && claimedBy !== claimSessionId) {
+        let claimLive = true;
+        if (claimedOrderId) {
+          const claimSnap = await t.get(
+            restaurantRef.collection("orders").doc(claimedOrderId)
+          );
+          if (claimSnap.exists) {
+            const c = claimSnap.data()!;
+            claimLive =
+              c.status === "PLACED" ||
+              c.status === "PREPARING" ||
+              c.status === "READY" ||
+              (c.status === "SERVED" && c.paymentStatus !== "PAID");
+          } else {
+            claimLive = false;
+          }
+        }
+        if (claimLive) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "Table is currently occupied. Please wait until the current order is completed and payment is confirmed."
+          );
+        }
+      }
+
       const orderItems: Array<{
         menuItemId: string;
         itemName: string;
@@ -204,6 +244,12 @@ export const createSecureOrder = functions.https.onCall(
           ...oi,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+      });
+      // Claim the table in the SAME transaction as order creation.
+      t.update(tableRef, {
+        occupiedBy: claimSessionId,
+        currentOrderId: orderRef.id,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       for (const su of stockUpdates) {
         const upd: Record<string, unknown> = {
