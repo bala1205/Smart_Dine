@@ -26,14 +26,17 @@ export interface ServiceRequest {
   updatedAt: number;
 }
 
+import type { LucideIcon } from "lucide-react";
+import { BellRing, Droplets, ReceiptText, LifeBuoy } from "lucide-react";
+
 export const SERVICE_REQUEST_TYPES: Record<
   ServiceRequestType,
-  { label: string; icon: string; short: string }
+  { label: string; icon: string; short: string; Icon: LucideIcon }
 > = {
-  CALL_WAITER: { label: "Call Waiter", icon: "🔔", short: "Call Waiter" },
-  REQUEST_WATER: { label: "Request Water", icon: "💧", short: "Water" },
-  REQUEST_BILL: { label: "Request Bill", icon: "💵", short: "Bill" },
-  NEED_ASSISTANCE: { label: "Need Assistance", icon: "🆘", short: "Assistance" },
+  CALL_WAITER: { label: "Call Waiter", icon: "🔔", short: "Call Waiter", Icon: BellRing },
+  REQUEST_WATER: { label: "Request Water", icon: "💧", short: "Water", Icon: Droplets },
+  REQUEST_BILL: { label: "Request Bill", icon: "💵", short: "Bill", Icon: ReceiptText },
+  NEED_ASSISTANCE: { label: "Need Assistance", icon: "🆘", short: "Assistance", Icon: LifeBuoy },
 };
 
 export const SERVICE_REQUEST_STATUS_LABELS: Record<ServiceRequestStatus, string> = {

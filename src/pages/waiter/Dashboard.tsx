@@ -41,27 +41,26 @@ export default function WaiterDashboard() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Waiter Requests</h1>
-          <p className="text-gray-500 text-sm">
-            {pendingCount > 0 ? `${pendingCount} pending request${pendingCount > 1 ? "s" : ""} needs attention` : "All caught up"}
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="page-header !mb-0">
+          <h1>Service requests</h1>
+          <p aria-live="polite">
+            {pendingCount > 0 ? `${pendingCount} pending request${pendingCount > 1 ? "s" : ""} need${pendingCount > 1 ? "" : "s"} attention` : "All caught up"}
           </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-xs text-gray-500">Realtime</span>
+        <div className="flex items-center gap-2 shrink-0" role="status">
+          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
+          <span className="text-xs font-semibold text-ink-500">Live</span>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Filter requests">
         {FILTERS.map((f) => (
           <button
             key={f.label}
             onClick={() => setFilter(f.value)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              filter === f.value ? "bg-brand-600 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-            }`}
+            aria-pressed={filter === f.value}
+            className="filter-pill"
           >
             {f.label}
           </button>
@@ -69,60 +68,70 @@ export default function WaiterDashboard() {
       </div>
 
       {loading ? (
-        <div className="text-center text-gray-500 py-16">Loading requests...</div>
+        <div className="space-y-3" aria-label="Loading requests">
+          <div className="skeleton-shimmer rounded-2xl h-20 w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-20 w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-20 w-full" />
+        </div>
       ) : sorted.length === 0 ? (
-        <EmptyState title={filter ? `No ${filter.toLowerCase()} requests` : "No requests"} description="Service requests from customers will appear here in real time." />
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card">
+          <EmptyState title={filter ? `No ${filter.toLowerCase()} requests` : "No requests"} description="Service requests from customers will appear here in real time." />
+        </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-3" role="log" aria-live="polite" aria-label="Service requests">
           {sorted.map((req) => {
             const meta = SERVICE_REQUEST_TYPES[req.requestType];
+            const RequestIcon = meta.Icon;
             return (
-              <div key={req.id} className="bg-white rounded-xl shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3 border border-gray-100">
+              <div key={req.id} className="bg-white rounded-2xl shadow-card p-4 flex flex-col sm:flex-row sm:items-center gap-3 border border-surface-200">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-12 h-12 rounded-xl bg-brand-50 flex items-center justify-center text-2xl flex-shrink-0">{meta.icon}</div>
+                  <div className="w-11 h-11 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center shrink-0" aria-hidden="true">
+                    <RequestIcon className="w-5 h-5 text-brand-700" strokeWidth={1.75} />
+                  </div>
                   <div className="min-w-0">
-                    <div className="font-semibold text-gray-800 flex items-center gap-2">
-                      Table {String(req.tableNumber).padStart(2, "0")} — {meta.label}
+                    <div className="font-semibold text-[14px] text-ink-900 flex items-center gap-2 flex-wrap">
+                      <span>Table {String(req.tableNumber).padStart(2, "0")} • {meta.label}</span>
                       <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border whitespace-nowrap ${
                           req.status === "PENDING"
-                            ? "bg-amber-100 text-amber-700"
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
                             : req.status === "ACKNOWLEDGED"
-                            ? "bg-blue-100 text-blue-700"
+                            ? "bg-blue-50 text-blue-700 border-blue-200"
                             : req.status === "COMPLETED" || req.status === "RESOLVED"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-gray-100 text-gray-500"
+                            ? "bg-green-50 text-green-700 border-green-200"
+                            : "bg-surface-50 text-ink-500 border-surface-200"
                         }`}
                       >
                         {SERVICE_REQUEST_STATUS_LABELS[req.status]}
                       </span>
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {formatTime(req.createdAt)} • Session {req.customerSessionId.slice(0, 6)} {req.orderId ? `• Order #${req.orderId.slice(-4).toUpperCase()}` : ""}
+                    <div className="text-xs text-ink-500 mt-1 tabular-nums">
+                      {formatTime(req.createdAt)}{req.orderId ? ` • Order #${req.orderId.slice(-4).toUpperCase()}` : ""}
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2 sm:ml-auto">
+                <div className="flex flex-col sm:flex-row gap-2 sm:ml-auto w-full sm:w-auto">
                   {req.status === "PENDING" && (
                     <>
                       <button
                         disabled={busyId === req.id}
+                        aria-busy={busyId === req.id || undefined}
                         onClick={() => handle(req.id, "ACKNOWLEDGED")}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                        className="pressable px-3.5 py-2 min-h-[38px] rounded-xl bg-ink-900 text-white text-[13px] font-semibold hover:bg-ink-700 disabled:opacity-50"
                       >
                         Acknowledge
                       </button>
                       <button
                         disabled={busyId === req.id}
                         onClick={() => handle(req.id, "COMPLETED")}
-                        className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                        className="pressable px-3.5 py-2 min-h-[38px] rounded-xl bg-green-600 text-white text-[13px] font-semibold hover:bg-green-700 disabled:opacity-50"
                       >
                         Complete
                       </button>
                       <button
                         disabled={busyId === req.id}
                         onClick={() => handle(req.id, "CANCELLED")}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        className="pressable px-3.5 py-2 min-h-[38px] rounded-xl border border-surface-200 text-[13px] font-semibold text-ink-500 hover:bg-surface-50 disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -133,14 +142,14 @@ export default function WaiterDashboard() {
                       <button
                         disabled={busyId === req.id}
                         onClick={() => handle(req.id, "COMPLETED")}
-                        className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                        className="pressable px-3.5 py-2 min-h-[38px] rounded-xl bg-green-600 text-white text-[13px] font-semibold hover:bg-green-700 disabled:opacity-50"
                       >
-                        Mark Completed
+                        Mark completed
                       </button>
                       <button
                         disabled={busyId === req.id}
                         onClick={() => handle(req.id, "CANCELLED")}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        className="pressable px-3.5 py-2 min-h-[38px] rounded-xl border border-surface-200 text-[13px] font-semibold text-ink-500 hover:bg-surface-50 disabled:opacity-50"
                       >
                         Cancel
                       </button>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatCurrency, formatDateOnly, formatTime, toMs } from "./formatting";
+import { formatCurrency, formatDateOnly, formatTime, formatRelativeTime, toMs } from "./formatting";
 
 describe("toMs", () => {
   it("handles number", () => {
@@ -37,5 +37,23 @@ describe("formatDateOnly / formatTime", () => {
     const ms = new Date("2024-01-15T10:30:00").getTime();
     expect(formatDateOnly(ms)).not.toBe("--");
     expect(formatTime(ms)).not.toBe("--");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = new Date("2024-01-15T10:30:00").getTime();
+  it("returns -- for null", () => {
+    expect(formatRelativeTime(null, now)).toBe("--");
+  });
+  it("says Just now under a minute", () => {
+    expect(formatRelativeTime(now - 10 * 1000, now)).toBe("Just now");
+  });
+  it("formats minutes", () => {
+    expect(formatRelativeTime(now - 2 * 60 * 1000, now)).toBe("2 min ago");
+    expect(formatRelativeTime(now - 60 * 1000, now)).toBe("1 min ago");
+  });
+  it("formats hours and days", () => {
+    expect(formatRelativeTime(now - 3 * 60 * 60 * 1000, now)).toBe("3 hours ago");
+    expect(formatRelativeTime(now - 2 * 24 * 60 * 60 * 1000, now)).toBe("2 days ago");
   });
 });

@@ -135,10 +135,10 @@ export default function OwnerAnalytics() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm p-5">
-          <h3 className="font-semibold text-gray-800 mb-3">Most Ordered Dishes 🍽️</h3>
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-5">
+          <h3 className="font-bold tracking-tight text-[15px] text-ink-900 mb-3">Most ordered dishes</h3>
           {dishStats.length === 0 ? (
-            <p className="text-sm text-gray-400">No dish data for this period</p>
+            <p className="text-sm text-ink-400">No dish data for this period</p>
           ) : (
             <div className="space-y-2">
               {dishStats.map((d, idx) => (
@@ -153,19 +153,19 @@ export default function OwnerAnalytics() {
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-5">
-          <h3 className="font-semibold text-gray-800 mb-3">Peak Ordering Hours ⏰</h3>
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-5">
+          <h3 className="font-bold tracking-tight text-[15px] text-ink-900 mb-3">Peak ordering hours</h3>
           {peakHours.every((p) => p.count === 0) ? (
-            <p className="text-sm text-gray-400">No orders in this period</p>
+            <p className="text-sm text-ink-400">No orders in this period</p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5" role="list" aria-label="Orders by hour">
               {peakHours.map((p) => (
-                <div key={p.hour} className="flex items-center gap-2">
-                  <span className="w-16 text-xs text-gray-500">{p.label}</span>
-                  <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-brand-500 rounded-full" style={{ width: `${(p.count / maxPeak) * 100}%` }} />
+                <div key={p.hour} className="flex items-center gap-2" role="listitem">
+                  <span className="w-16 text-xs text-ink-500 tabular-nums">{p.label}</span>
+                  <div className="flex-1 h-2.5 bg-surface-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={p.count} aria-valuemin={0} aria-valuemax={maxPeak} aria-label={`${p.label}: ${p.count} orders`}>
+                    <div className="h-full bg-brand-600 rounded-full" style={{ width: `${(p.count / maxPeak) * 100}%` }} />
                   </div>
-                  <span className="w-8 text-xs text-gray-700 text-right">{p.count}</span>
+                  <span className="w-8 text-xs text-ink-700 text-right tabular-nums">{p.count}</span>
                 </div>
               ))}
             </div>

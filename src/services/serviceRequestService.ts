@@ -107,7 +107,8 @@ export async function updateServiceRequestStatus(
 export function subscribeToServiceRequests(
   restaurantId: string,
   callback: (requests: ServiceRequest[]) => void,
-  status?: ServiceRequestStatus | null
+  status?: ServiceRequestStatus | null,
+  onError?: (err: Error) => void
 ): Unsubscribe {
   let q = query(serviceRequestCol(restaurantId), orderBy("createdAt", "desc"), limit(100));
   if (status) {
@@ -124,7 +125,10 @@ export function subscribeToServiceRequests(
       const list = snap.docs.map((d) => ({ id: d.id, ...normalize(d.data()) }));
       callback(list);
     },
-    () => callback([])
+    (err) => {
+      if (onError) onError(err as Error);
+      else callback([]);
+    }
   );
 }
 

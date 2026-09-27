@@ -22,41 +22,51 @@ export default function KitchenOrders() {
   const { orders, loading } = useOrders(restaurantId, status);
 
   if (loading && restaurantId) {
-    return <div className="text-center text-gray-500 py-16">Loading orders...</div>;
+    return (
+      <div className="space-y-2.5" aria-label="Loading orders">
+        <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+        <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+        <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+      </div>
+    );
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-4">Order History</h1>
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="page-header">
+        <h1>Order history</h1>
+        <p>All kitchen orders in one place</p>
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Filter orders">
         {FILTERS.map((f) => (
           <button
             key={f.label}
             onClick={() => setStatus(f.value)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium ${
-              status === f.value ? "bg-brand-600 text-white" : "bg-white text-gray-600 border border-gray-200"
-            }`}
+            aria-pressed={status === f.value}
+            className="filter-pill"
           >
             {f.label}
           </button>
         ))}
       </div>
       {orders.length === 0 ? (
-        <EmptyState title="No orders yet" description="Orders will appear here." />
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card">
+          <EmptyState title="No orders yet" description="Orders will appear here." />
+        </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card divide-y divide-surface-100 overflow-hidden">
           {orders.map((order) => (
-            <div key={order.id} className="p-4 flex flex-wrap items-center gap-3">
+            <div key={order.id} className="px-4 sm:px-5 py-4 flex flex-wrap items-center gap-3">
               <div className="min-w-32">
-                <div className="font-bold text-gray-800">
+                <div className="font-mono font-bold text-ink-900 tabular-nums">
                   #{order.id.slice(-4).toUpperCase()}
                 </div>
-                <div className="text-sm text-gray-500">Table {order.tableNumber}</div>
+                <div className="text-[13px] text-ink-500">Table {order.tableNumber}</div>
               </div>
-              <div className="flex-1 text-sm text-gray-600">
+              <div className="flex-1 text-sm text-ink-500 tabular-nums">
                 {formatTime(order.createdAt)}
               </div>
-              <div className="font-semibold text-gray-800">
+              <div className="font-bold text-ink-900 tabular-nums">
                 {formatCurrency(order.totalAmount)}
               </div>
               <StatusBadge status={order.status} />

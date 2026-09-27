@@ -78,8 +78,8 @@ export function OrderIntentPreview({
                 className="flex items-center justify-between bg-surface-50 rounded-xl px-3 py-2.5 border border-surface-100"
               >
                 <span className="flex items-center gap-2">
-                  <span aria-hidden="true" className="text-success-600">
-                    ✓
+                  <span aria-hidden="true" className="w-5 h-5 rounded-full bg-green-50 border border-green-200 flex items-center justify-center shrink-0">
+                    <svg className="w-3 h-3 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                   </span>
                   <span className="font-medium text-ink-900" aria-label={`${it.name} quantity ${it.quantity}`}>
                     {it.name} × {it.quantity}

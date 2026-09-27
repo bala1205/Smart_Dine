@@ -17,6 +17,8 @@ export function useRealtimeServiceRequests(
 ) {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!restaurantId) {
@@ -24,12 +26,22 @@ export function useRealtimeServiceRequests(
       return;
     }
     setLoading(true);
-    const unsub = subscribeToServiceRequests(restaurantId, (list) => {
-      setRequests(list);
-      setLoading(false);
-    }, status ?? undefined);
+    setError(null);
+    const unsub = subscribeToServiceRequests(
+      restaurantId,
+      (list) => {
+        setRequests(list);
+        setError(null);
+        setLoading(false);
+      },
+      status ?? undefined,
+      () => {
+        setError("Unable to load service requests. Please check your connection and try again.");
+        setLoading(false);
+      }
+    );
     return () => unsub();
-  }, [restaurantId, status]);
+  }, [restaurantId, status, retryKey]);
 
   const changeStatus = useCallback(
     async (requestId: string, newStatus: ServiceRequestStatus) => {
@@ -39,7 +51,11 @@ export function useRealtimeServiceRequests(
     [restaurantId]
   );
 
-  return { requests, loading, changeStatus };
+  const retry = useCallback(() => {
+    setRetryKey((k) => k + 1);
+  }, []);
+
+  return { requests, loading, error, retry, changeStatus };
 }
 
 export function useCustomerServiceRequests(

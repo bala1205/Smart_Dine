@@ -1,31 +1,32 @@
+import type { LucideIcon } from "lucide-react";
+import { Inbox, TriangleAlert } from "lucide-react";
+
 export function EmptyState({
   title,
   description,
   action,
+  icon: Icon = Inbox,
+  compact = false,
 }: {
   title: string;
   description?: string;
   action?: React.ReactNode;
+  icon?: LucideIcon;
+  compact?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center py-16 px-6">
-      <div className="w-16 h-16 rounded-2xl bg-surface-50 border border-surface-200 flex items-center justify-center mb-4">
-        <svg
-          className="w-8 h-8 text-ink-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.5"
-            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-          />
-        </svg>
+    <div
+      role="status"
+      className={`flex flex-col items-center justify-center text-center ${compact ? "py-8 px-4" : "py-14 sm:py-16 px-6"}`}
+    >
+      <div
+        className={`${compact ? "w-12 h-12" : "w-14 h-14"} rounded-2xl bg-surface-50 border border-surface-200 flex items-center justify-center mb-4`}
+        aria-hidden="true"
+      >
+        <Icon className={`${compact ? "w-6 h-6" : "w-7 h-7"} text-ink-400`} strokeWidth={1.75} />
       </div>
-      <h3 className="text-base font-bold tracking-tight text-ink-900">{title}</h3>
-      {description && <p className="text-sm text-ink-500 mt-1 max-w-sm">{description}</p>}
+      <h3 className="text-[15px] font-bold tracking-tight text-ink-900">{title}</h3>
+      {description && <p className="text-sm text-ink-500 mt-1.5 max-w-[38ch] leading-relaxed">{description}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
@@ -33,25 +34,18 @@ export function EmptyState({
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center py-16 px-4">
-      <svg
-        className="w-14 h-14 text-red-300 mb-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-        />
-      </svg>
-      <h3 className="text-lg font-semibold text-gray-800">Something went wrong</h3>
-      <p className="text-sm text-gray-500 mt-1 max-w-sm">{message}</p>
+    <div role="alert" className="flex flex-col items-center justify-center text-center py-14 sm:py-16 px-6">
+      <div className="w-14 h-14 rounded-2xl bg-danger-50 border border-danger-100 flex items-center justify-center mb-4" aria-hidden="true">
+        <TriangleAlert className="w-7 h-7 text-danger-600" strokeWidth={1.75} />
+      </div>
+      <h3 className="text-[15px] font-bold tracking-tight text-ink-900">Something went wrong</h3>
+      <p className="text-sm text-ink-500 mt-1.5 max-w-[42ch] leading-relaxed">{message}</p>
       {onRetry && (
-        <button onClick={onRetry} className="mt-4 px-4 py-2 bg-brand-600 text-white rounded-md text-sm font-medium hover:bg-brand-700">
-          Try Again
+        <button
+          onClick={onRetry}
+          className="pressable mt-5 px-4 py-2.5 min-h-[42px] bg-ink-900 text-white rounded-xl text-sm font-semibold hover:bg-ink-700"
+        >
+          Try again
         </button>
       )}
     </div>
@@ -59,5 +53,15 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
 }
 
 export function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse bg-gray-200 rounded ${className}`} />;
+  return <div aria-hidden="true" className={`skeleton-shimmer rounded-lg ${className}`} />;
+}
+
+export function SkeletonRows({ rows = 3, className = "" }: { rows?: number; className?: string }) {
+  return (
+    <div className={`space-y-3 ${className}`} aria-hidden="true" aria-label="Loading content">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="skeleton-shimmer rounded-xl h-16 w-full" />
+      ))}
+    </div>
+  );
 }

@@ -47,67 +47,63 @@ function BillSplit({ order, items, restaurant }: { order: Order; items: OrderIte
   })();
 
   return (
-    <div className="bg-white rounded-xl shadow-sm p-4 mt-4">
-      <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-        <Split className="w-4 h-4" /> Split Bill
+    <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-4 sm:p-5 mt-4">
+      <h3 className="font-bold tracking-tight text-[15px] text-ink-900 mb-3 flex items-center gap-2">
+        <span className="w-8 h-8 rounded-xl bg-surface-50 border border-surface-200 flex items-center justify-center shrink-0" aria-hidden="true">
+          <Split className="w-4 h-4 text-ink-500" />
+        </span>
+        Split bill
       </h3>
-      <div className="flex gap-2 mb-3">
-        <button onClick={() => setMode("equal")} className={`flex-1 py-2 rounded-lg text-sm font-medium border ${mode === "equal" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-gray-200"}`}>
-          Split Equally
+      <div className="flex gap-2 mb-3" role="group" aria-label="Split mode">
+        <button onClick={() => setMode("equal")} aria-pressed={mode === "equal"} className={`pressable flex-1 py-2.5 min-h-[42px] rounded-xl text-[13px] font-semibold border ${mode === "equal" ? "bg-ink-900 border-ink-900 text-white" : "bg-white border-surface-200 text-ink-500 hover:border-surface-300"}`}>
+          Split equally
         </button>
-        <button onClick={() => setMode("items")} className={`flex-1 py-2 rounded-lg text-sm font-medium border ${mode === "items" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-gray-200"}`}>
-          Split by Items
+        <button onClick={() => setMode("items")} aria-pressed={mode === "items"} className={`pressable flex-1 py-2.5 min-h-[42px] rounded-xl text-[13px] font-semibold border ${mode === "items" ? "bg-ink-900 border-ink-900 text-white" : "bg-white border-surface-200 text-ink-500 hover:border-surface-300"}`}>
+          Split by items
         </button>
       </div>
 
       {mode === "equal" ? (
         <div>
           <div className="flex items-center gap-3 mb-3">
-            <label className="text-sm text-gray-600">People</label>
-            <input type="number" min={2} max={20} value={people} onChange={(e) => setPeople(Math.max(2, Number(e.target.value) || 2))} className="w-20 px-3 py-1.5 border border-gray-200 rounded-lg text-sm" />
+            <label htmlFor="split-people" className="text-[13px] font-semibold text-ink-700">People</label>
+            <input id="split-people" type="number" min={2} max={12} value={people} onChange={(e) => setPeople(Math.min(12, Math.max(2, Number(e.target.value) || 2)))} className="w-20 px-3 py-2 min-h-[40px] border border-surface-200 rounded-xl text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto thin-scroll pr-0.5">
             {Array.from({ length: people }).map((_, i) => (
-              <div key={i} className="bg-gray-50 rounded-lg p-3 text-sm">
-                <div className="font-medium text-gray-700">Person {i + 1}</div>
-                <div className="text-gray-600">Subtotal {formatCurrency(equalShare.subtotal)}</div>
-                <div className="text-gray-600">GST {formatCurrency(equalShare.gst)}</div>
-                <div className="text-gray-600">Service {formatCurrency(equalShare.sc)}</div>
-                <div className="font-bold text-gray-900">Pay {formatCurrency(equalShare.total)}</div>
+              <div key={i} className="bg-surface-50 border border-surface-200 rounded-xl p-3 text-sm">
+                <div className="font-semibold text-ink-900">Person {i + 1}</div>
+                <div className="text-ink-500 text-[13px] tabular-nums">Pays {formatCurrency(equalShare.total)}</div>
+                <div className="font-bold text-ink-900 tabular-nums mt-0.5">{formatCurrency(equalShare.total)}</div>
               </div>
             ))}
           </div>
-          <p className="text-xs text-gray-400 mt-2">Total split checks: {formatCurrency(equalShare.total * people)} vs Bill {formatCurrency(bill.grandTotal)} (rounding may differ by few paise)</p>
+          <p className="text-xs text-ink-400 mt-2 tabular-nums">Total of splits {formatCurrency(equalShare.total * people)} • Bill {formatCurrency(bill.grandTotal)}</p>
         </div>
       ) : (
         <div>
-          <p className="text-xs text-gray-500 mb-2">Select items for Customer A, rest goes to Customer B</p>
-          <div className="space-y-2 max-h-64 overflow-y-auto mb-3">
+          <p className="text-xs text-ink-500 mb-2">Select items for Group A, rest goes to Group B</p>
+          <fieldset className="space-y-2 max-h-64 overflow-y-auto thin-scroll mb-3 pr-0.5">
+            <legend className="sr-only">Choose items for Group A</legend>
             {items.map((it, idx) => (
-              <label key={it.id} className="flex items-center gap-2 p-2 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input type="checkbox" checked={selected[idx]} onChange={(e) => setSelected((s) => s.map((v, i) => (i === idx ? e.target.checked : v)))} className="rounded" />
-                <span className="flex-1 text-sm text-gray-700">{it.itemName} × {it.quantity}</span>
-                <span className="text-sm font-medium">{formatCurrency(it.price * it.quantity)}</span>
+              <label key={it.id} className="flex items-center gap-2.5 p-2.5 border border-surface-200 rounded-xl cursor-pointer hover:border-surface-300 hover:bg-surface-50 has-checked:border-brand-300 has-checked:bg-brand-50/50">
+                <input type="checkbox" checked={selected[idx]} onChange={(e) => setSelected((s) => s.map((v, i) => (i === idx ? e.target.checked : v)))} className="w-4 h-4 rounded accent-orange-600" />
+                <span className="flex-1 text-sm text-ink-700 min-w-0 truncate">{it.itemName} <span className="text-ink-400 tabular-nums">× {it.quantity}</span></span>
+                <span className="text-sm font-semibold tabular-nums">{formatCurrency(it.price * it.quantity)}</span>
               </label>
             ))}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-blue-50 rounded-lg p-3">
-              <div className="font-medium text-sm text-blue-800">Customer A</div>
-              <div className="text-xs text-gray-600">Subtotal {formatCurrency(itemSplit.a.subtotal)}</div>
-              <div className="text-xs text-gray-600">GST {formatCurrency(itemSplit.a.gstAmount)}</div>
-              <div className="text-xs text-gray-600">Service {formatCurrency(itemSplit.a.serviceChargeAmount)}</div>
-              <div className="font-bold text-blue-900">{formatCurrency(itemSplit.a.grandTotal)}</div>
+          </fieldset>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="bg-surface-50 border border-surface-200 rounded-xl p-3">
+              <div className="font-semibold text-[13px] text-ink-900">Group A</div>
+              <div className="font-bold text-ink-900 tabular-nums mt-0.5">{formatCurrency(itemSplit.a.grandTotal)}</div>
             </div>
-            <div className="bg-green-50 rounded-lg p-3">
-              <div className="font-medium text-sm text-green-800">Customer B</div>
-              <div className="text-xs text-gray-600">Subtotal {formatCurrency(itemSplit.b.subtotal)}</div>
-              <div className="text-xs text-gray-600">GST {formatCurrency(itemSplit.b.gstAmount)}</div>
-              <div className="text-xs text-gray-600">Service {formatCurrency(itemSplit.b.serviceChargeAmount)}</div>
-              <div className="font-bold text-green-900">{formatCurrency(itemSplit.b.grandTotal)}</div>
+            <div className="bg-surface-50 border border-surface-200 rounded-xl p-3">
+              <div className="font-semibold text-[13px] text-ink-900">Group B</div>
+              <div className="font-bold text-ink-900 tabular-nums mt-0.5">{formatCurrency(itemSplit.b.grandTotal)}</div>
             </div>
           </div>
-          <p className="text-xs text-gray-400 mt-2">Combined: {formatCurrency(itemSplit.a.grandTotal + itemSplit.b.grandTotal)} / Bill {formatCurrency(bill.grandTotal)}</p>
+          <p className="text-xs text-ink-400 mt-2 tabular-nums">Combined {formatCurrency(itemSplit.a.grandTotal + itemSplit.b.grandTotal)} • Bill {formatCurrency(bill.grandTotal)}</p>
         </div>
       )}
     </div>
@@ -142,8 +138,8 @@ export default function DigitalBill() {
       .finally(() => setLoading(false));
   }, [restaurantId, orderId]);
 
-  if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><PageLoader label="Loading bill..." /></div>;
-  if (!order) return <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4"><div className="text-center"><p className="text-gray-600">Order not found</p><button onClick={() => navigate(-1)} className="mt-3 text-brand-600">Go back</button></div></div>;
+  if (loading) return <div className="min-h-screen bg-surface-50 flex items-center justify-center"><PageLoader label="Loading bill..." /></div>;
+  if (!order) return <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4"><div className="text-center bg-white rounded-2xl border border-surface-200 shadow-card p-8 max-w-sm"><p className="text-sm font-semibold text-ink-900">Order not found</p><p className="text-sm text-ink-500 mt-1">This bill link may be invalid or expired.</p><button onClick={() => navigate(-1)} className="mt-4 text-sm font-semibold text-brand-700 hover:underline underline-offset-2">Go back</button></div></div>;
 
   const currentOrder = order as Order;
   // Use historical order snapshot for GST/service charge so bill doesn't change if restaurant updates settings later.
@@ -216,61 +212,61 @@ export default function DigitalBill() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-10">
-      <div className="max-w-lg mx-auto px-4 py-6">
-        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-800 mb-4">
-          <ArrowLeft className="w-4 h-4" /> Back
+    <div className="min-h-screen bg-surface-50 pb-10">
+      <div className="max-w-lg mx-auto px-4 py-5 sm:py-6">
+        <button onClick={() => navigate(-1)} aria-label="Go back" className="pressable flex items-center gap-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 mb-4 px-1 py-1.5">
+          <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back
         </button>
 
-        <div id="bill-content" className="bg-white rounded-xl shadow-sm p-6">
-          <div className="text-center border-b border-gray-100 pb-4 mb-4">
-            {restaurant?.logoUrl ? <img src={restaurant.logoUrl} alt={restaurant?.name} className="w-14 h-14 rounded-full object-cover mx-auto mb-2" /> : <div className="w-14 h-14 rounded-full bg-brand-100 flex items-center justify-center text-xl font-bold text-brand-600 mx-auto mb-2">{restaurant?.name?.charAt(0) || "S"}</div>}
-            <h1 className="text-xl font-bold text-gray-800">{restaurant?.name || "Smart Dine"}</h1>
-            {restaurant?.address && <p className="text-xs text-gray-500 mt-1">{restaurant.address}</p>}
-            {restaurant?.phone && <p className="text-xs text-gray-500">{restaurant.phone}</p>}
+        <div id="bill-content" className="bg-white rounded-2xl border border-surface-200 shadow-card p-5 sm:p-6">
+          <div className="text-center border-b border-surface-100 pb-4 mb-4">
+            {restaurant?.logoUrl ? <img src={restaurant.logoUrl} alt={`${restaurant?.name} logo`} className="w-14 h-14 rounded-2xl object-cover mx-auto mb-2.5 border border-surface-100" /> : <div className="w-14 h-14 rounded-2xl bg-surface-50 border border-surface-200 flex items-center justify-center text-xl font-bold text-ink-500 mx-auto mb-2.5" aria-hidden="true">{restaurant?.name?.charAt(0) || "S"}</div>}
+            <h1 className="text-xl font-bold tracking-tight text-ink-900">{restaurant?.name || "Smart Dine"}</h1>
+            {restaurant?.address && <p className="text-xs text-ink-500 mt-1">{restaurant.address}</p>}
+            {restaurant?.phone && <p className="text-xs text-ink-500 tabular-nums">{restaurant.phone}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-            <div><span className="text-gray-500">Table</span><div className="font-semibold text-gray-800">Table {currentOrder.tableNumber}</div></div>
-            <div className="text-right"><span className="text-gray-500">Order</span><div className="font-mono font-bold text-gray-800">#{currentOrder.id.slice(-4).toUpperCase()}</div></div>
-            <div><span className="text-gray-500">Date</span><div className="font-medium text-gray-800">{formatDate(currentOrder.createdAt)}</div></div>
-            <div className="text-right"><span className="text-gray-500">Status</span><div className="font-medium text-gray-800">{currentOrder.status}</div></div>
+            <div><span className="text-xs font-medium text-ink-400">Table</span><div className="font-bold text-ink-900 mt-0.5">Table {currentOrder.tableNumber}</div></div>
+            <div className="text-right"><span className="text-xs font-medium text-ink-400">Order</span><div className="font-mono font-bold text-ink-900 tabular-nums mt-0.5">#{currentOrder.id.slice(-4).toUpperCase()}</div></div>
+            <div><span className="text-xs font-medium text-ink-400">Date</span><div className="font-medium text-ink-900 mt-0.5">{formatDate(currentOrder.createdAt)}</div></div>
+            <div className="text-right"><span className="text-xs font-medium text-ink-400">Status</span><div className="font-medium text-ink-900 mt-0.5">{currentOrder.status}</div></div>
           </div>
 
-          <div className="border-t border-gray-100 pt-4">
-            <h3 className="font-semibold text-gray-800 mb-2">Items</h3>
+          <div className="border-t border-surface-100 pt-4">
+            <h3 className="font-bold tracking-tight text-[15px] text-ink-900 mb-2.5">Items</h3>
             <div className="space-y-2">
               {items.map((it) => (
-                <div key={it.id} className="flex justify-between text-sm">
-                  <span className="text-gray-700">{it.itemName} <span className="text-gray-400">× {it.quantity}</span> <span className="text-xs text-gray-400">@{formatCurrency(it.price)}</span></span>
-                  <span className="font-medium text-gray-800">{formatCurrency(it.price * it.quantity)}</span>
+                <div key={it.id} className="flex justify-between items-baseline gap-3 text-sm">
+                  <span className="text-ink-700 min-w-0">{it.itemName} <span className="text-ink-400 tabular-nums">× {it.quantity}</span> <span className="text-xs text-ink-400 tabular-nums">@{formatCurrency(it.price)}</span></span>
+                  <span className="font-semibold text-ink-900 tabular-nums shrink-0">{formatCurrency(it.price * it.quantity)}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="border-t border-gray-100 mt-4 pt-3 space-y-1.5 text-sm">
-            <div className="flex justify-between text-gray-600"><span>Subtotal</span><span className="font-medium text-gray-800">{formatCurrency(bill.subtotal)}</span></div>
-            <div className="flex justify-between text-gray-600"><span>GST {bill.gstPercent}%</span><span className="font-medium text-gray-800">{formatCurrency(bill.gstAmount)}</span></div>
-            <div className="flex justify-between text-gray-600"><span>Service Charge {bill.serviceChargePercent}%</span><span className="font-medium text-gray-800">{formatCurrency(bill.serviceChargeAmount)}</span></div>
-            <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-200 pt-2 mt-2"><span>TOTAL</span><span>{formatCurrency(bill.grandTotal)}</span></div>
+          <div className="border-t border-surface-100 mt-4 pt-3 space-y-1.5 text-sm">
+            <div className="flex justify-between text-ink-500"><span>Subtotal</span><span className="font-medium text-ink-900 tabular-nums">{formatCurrency(bill.subtotal)}</span></div>
+            <div className="flex justify-between text-ink-500"><span>GST {bill.gstPercent}%</span><span className="font-medium text-ink-900 tabular-nums">{formatCurrency(bill.gstAmount)}</span></div>
+            <div className="flex justify-between text-ink-500"><span>Service charge {bill.serviceChargePercent}%</span><span className="font-medium text-ink-900 tabular-nums">{formatCurrency(bill.serviceChargeAmount)}</span></div>
+            <div className="flex justify-between text-[15px] font-bold text-ink-900 border-t border-surface-200 pt-2.5 mt-2"><span>Total</span><span className="tabular-nums">{formatCurrency(bill.grandTotal)}</span></div>
           </div>
 
-          <p className="text-xs text-gray-400 text-center mt-4">Thank you for dining with us!</p>
+          <p className="text-xs text-ink-400 text-center mt-4">Thank you for dining with us.</p>
         </div>
 
-        <div className="flex gap-3 mt-4">
-          <Button onClick={handleDownload} variant="secondary" className="flex-1"><Download className="w-4 h-4" /> Download Bill</Button>
-          <Button onClick={handleShare} className="flex-1"><Share2 className="w-4 h-4" /> Share Bill</Button>
+        <div className="flex flex-col sm:flex-row gap-2.5 mt-4">
+          <Button onClick={handleDownload} variant="secondary" className="flex-1"><Download className="w-4 h-4" aria-hidden="true" /> Download</Button>
+          <Button onClick={handleShare} className="flex-1"><Share2 className="w-4 h-4" aria-hidden="true" /> Share</Button>
         </div>
 
-        <Button onClick={() => setShowSplit(!showSplit)} variant="secondary" className="w-full mt-3">
-          <Split className="w-4 h-4" /> {showSplit ? "Hide Split Bill" : "Split Bill"}
+        <Button onClick={() => setShowSplit(!showSplit)} aria-expanded={showSplit} variant="secondary" className="w-full mt-2.5">
+          <Split className="w-4 h-4" aria-hidden="true" /> {showSplit ? "Hide split" : "Split bill"}
         </Button>
         {showSplit && <BillSplit order={currentOrder} items={items} restaurant={restaurant ?? null} />}
 
         <div className="mt-4 text-center">
-          <button onClick={() => navigate(`/order/${currentOrder.id}?token=${currentOrder.trackingToken}`)} className="text-sm text-brand-600 hover:underline">View Order Tracking</button>
+          <button onClick={() => navigate(`/order/${currentOrder.id}?token=${currentOrder.trackingToken}`)} className="text-[13px] font-semibold text-brand-700 hover:underline underline-offset-2 px-2 py-1.5">View order tracking</button>
         </div>
       </div>
     </div>

@@ -43,12 +43,15 @@ export default function ForgotPassword() {
       subtitle="We'll email you a link to reset your password"
     >
       {sent ? (
-        <div className="text-center py-4">
-          <p className="text-sm text-gray-600">
+        <div className="text-center py-4" role="status">
+          <div className="w-12 h-12 rounded-2xl bg-green-50 border border-green-200 flex items-center justify-center mx-auto mb-3" aria-hidden="true">
+            <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+          </div>
+          <p className="text-sm text-ink-500 leading-relaxed max-w-[38ch] mx-auto">
             If an account exists for that email, a reset link has been sent.
           </p>
-          <Link to="/login" className="mt-4 inline-block text-sm text-brand-600 font-medium hover:underline">
-            Back to Login
+          <Link to="/login" className="mt-4 inline-block text-sm text-brand-700 font-semibold hover:underline underline-offset-2">
+            Back to login
           </Link>
         </div>
       ) : (
@@ -56,18 +59,19 @@ export default function ForgotPassword() {
           <Input
             label="Email"
             type="email"
+            autoComplete="email"
             placeholder="you@example.com"
             error={errors.email?.message}
             {...register("email")}
           />
-          <Button type="submit" loading={loading} className="w-full">
-            Send Reset Link
+          <Button type="submit" loading={loading} size="lg" className="w-full">
+            Send reset link
           </Button>
         </form>
       )}
-      <p className="mt-6 text-sm text-center text-gray-600">
+      <p className="mt-6 text-sm text-center text-ink-500">
         Remembered your password?{" "}
-        <Link to="/login" className="text-brand-600 font-medium hover:underline">
+        <Link to="/login" className="text-brand-700 font-semibold hover:underline underline-offset-2">
           Login
         </Link>
       </p>

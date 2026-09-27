@@ -65,17 +65,17 @@ export default function Login() {
           {...register("password")}
         />
         <div className="text-right">
-          <Link to="/forgot-password" className="text-sm text-brand-600 hover:underline">
+          <Link to="/forgot-password" className="text-sm font-semibold text-brand-700 hover:text-brand-600 hover:underline underline-offset-2">
             Forgot password?
           </Link>
         </div>
-        <Button type="submit" loading={loading} className="w-full">
+        <Button type="submit" loading={loading} size="lg" className="w-full">
           Login
         </Button>
       </form>
-      <p className="mt-6 text-sm text-center text-gray-600">
+      <p className="mt-6 text-sm text-center text-ink-500">
         New restaurant owner?{" "}
-        <Link to="/register" className="text-brand-600 font-medium hover:underline">
+        <Link to="/register" className="text-brand-700 font-semibold hover:underline underline-offset-2">
           Register
         </Link>
       </p>

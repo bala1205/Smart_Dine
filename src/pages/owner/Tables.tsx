@@ -316,21 +316,21 @@ export default function OwnerTables() {
                         : "bg-amber-100 text-amber-700"
                     }`}
                   >
-                    {status === "INACTIVE" ? "Inactive" : status === "AVAILABLE" ? "🟢 Available" : status === "OCCUPIED" ? `🔴 Occupied${occOrder ? ` • #${occOrder.id.slice(-4).toUpperCase()}` : ""}` : `🟡 Payment Pending${occOrder ? ` • #${occOrder.id.slice(-4).toUpperCase()}` : ""}`}
+                    {status === "INACTIVE" ? "Inactive" : status === "AVAILABLE" ? "Available" : status === "OCCUPIED" ? `Occupied${occOrder ? ` • #${occOrder.id.slice(-4).toUpperCase()}` : ""}` : `Payment pending${occOrder ? ` • #${occOrder.id.slice(-4).toUpperCase()}` : ""}`}
                   </span>
                 </div>
-                <p className="text-sm text-gray-500">Capacity: {t.capacity}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-gray-500">Customer Access:</span>
+                <p className="text-sm text-ink-500">Capacity: {t.capacity}</p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className="text-xs text-ink-500">Customer access:</span>
                   {((t as unknown as { isAccessAvailable?: boolean }).isAccessAvailable ?? true) ? (
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">🟢 Available</span>
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full"><span className="w-1.5 h-1.5 rounded-full bg-green-500" aria-hidden="true" />Available</span>
                   ) : (
-                    <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">🔴 Not Available</span>
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full"><span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-hidden="true" />Paused</span>
                   )}
                 </div>
                 {occOrder && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Order #{occOrder.id.slice(-4).toUpperCase()} • {occOrder.status} {occOrder.paymentStatus === "PAID" ? "• PAID" : occOrder.status === "SERVED" ? "• 🟡 Payment Pending" : ""} • {formatCurrency(occOrder.grandTotal ?? occOrder.totalAmount)} • {formatTime(occOrder.createdAt)}
+                  <p className="text-xs text-ink-500 mt-1.5 tabular-nums">
+                    Order #{occOrder.id.slice(-4).toUpperCase()} • {occOrder.status} {occOrder.paymentStatus === "PAID" ? "• Paid" : occOrder.status === "SERVED" ? "• Payment pending" : ""} • {formatCurrency(occOrder.grandTotal ?? occOrder.totalAmount)} • {formatTime(occOrder.createdAt)}
                   </p>
                 )}
                 <div className="mt-3 flex gap-2">
@@ -466,13 +466,13 @@ export default function OwnerTables() {
             const paymentStatus = (detailsOrder as unknown as { paymentStatus?: string })?.paymentStatus ?? (detailsOrder?.status === "SERVED" ? "PENDING" : undefined);
             return (
               <div className="space-y-4 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Occupancy</span>
-                  <span className={`font-medium px-2 py-0.5 rounded-full text-xs ${status === "AVAILABLE" ? "bg-green-100 text-green-700" : status === "OCCUPIED" ? "bg-red-100 text-red-700" : status === "INACTIVE" ? "bg-gray-100 text-gray-500" : "bg-amber-100 text-amber-700"}`}>{status === "PAYMENT_PENDING" ? "🟡 Payment Pending" : status === "OCCUPIED" ? "🔴 Occupied" : status === "AVAILABLE" ? "🟢 Available" : status}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-ink-500">Occupancy</span>
+                  <span className={`font-semibold px-2.5 py-1 rounded-full text-xs border ${status === "AVAILABLE" ? "bg-green-50 text-green-700 border-green-200" : status === "OCCUPIED" ? "bg-red-50 text-red-700 border-red-200" : status === "INACTIVE" ? "bg-surface-50 text-ink-500 border-surface-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{status === "PAYMENT_PENDING" ? "Payment pending" : status === "OCCUPIED" ? "Occupied" : status === "AVAILABLE" ? "Available" : status}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Customer Access</span>
-                  <span className={`font-medium px-2 py-0.5 rounded-full text-xs ${accessAvailable ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{accessAvailable ? "🟢 Available" : "🔴 Not Available"}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-ink-500">Customer access</span>
+                  <span className={`font-semibold px-2.5 py-1 rounded-full text-xs border ${accessAvailable ? "bg-green-50 text-green-700 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>{accessAvailable ? "Available" : "Paused"}</span>
                 </div>
                 {isOwner && (
                   <Button variant="secondary" className="w-full" onClick={() => toggleAccess(detailsTable)}>
@@ -496,9 +496,9 @@ export default function OwnerTables() {
                         <span>Table {detailsOrder.tableNumber}</span>
                       </div>
                       {detailsOrder.status === "SERVED" && (
-                        <div className="flex justify-between text-xs mt-1">
-                          <span className="text-gray-500">Payment</span>
-                          <span className={`font-medium px-2 py-0.5 rounded-full text-xs ${paymentStatus === "PAID" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>{paymentStatus === "PAID" ? "PAID / CLEARED" : "🟡 Payment Pending"}</span>
+                        <div className="flex justify-between text-xs mt-1 items-center">
+                          <span className="text-ink-500">Payment</span>
+                          <span className={`font-semibold px-2.5 py-1 rounded-full text-xs border ${paymentStatus === "PAID" ? "bg-green-50 text-green-700 border-green-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{paymentStatus === "PAID" ? "Paid" : "Payment pending"}</span>
                         </div>
                       )}
                       <div className="mt-2 space-y-1">

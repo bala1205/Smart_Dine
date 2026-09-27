@@ -18,71 +18,72 @@ export default function WaiterLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <aside className="w-64 bg-white border-r border-gray-200 flex-col hidden md:flex fixed inset-y-0 left-0">
-        <div className="px-6 py-5 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold">SD</div>
-            <div>
-              <div className="font-bold text-gray-800 leading-none">Smart Dine</div>
-              <div className="text-xs text-gray-400 mt-1">Waiter • {profile?.fullName?.split(" ")[0] || "Staff"}</div>
+    <div className="min-h-screen bg-surface-50 flex">
+      <a href="#main-content" className="skip-link">Skip to content</a>
+      <aside className="w-64 bg-white border-r border-surface-200 flex-col hidden md:flex fixed inset-y-0 left-0 shadow-card" aria-label="Waiter navigation">
+        <div className="px-6 py-5 border-b border-surface-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-ink-900 flex items-center justify-center text-white text-sm font-bold shrink-0" aria-hidden="true">SD</div>
+            <div className="min-w-0">
+              <div className="font-bold tracking-tight text-ink-900 leading-none">Smart Dine</div>
+              <div className="text-xs font-medium text-ink-500 mt-1 truncate">Waiter • {profile?.fullName?.split(" ")[0] || "Staff"}</div>
             </div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto thin-scroll" aria-label="Primary">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100"
+                `pressable flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium ${
+                  isActive ? "bg-ink-900 text-white shadow-sm" : "text-ink-500 hover:bg-surface-50 hover:text-ink-900"
                 }`
               }
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon className="w-5 h-5 shrink-0" aria-hidden="true" />
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-gray-100">
-          <button onClick={handleLogout} className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100">
-            <LogOut className="w-5 h-5" />
+        <div className="p-4 border-t border-surface-100">
+          <button onClick={handleLogout} className="pressable flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-ink-500 hover:bg-surface-50 hover:text-ink-900 min-h-[42px]">
+            <LogOut className="w-5 h-5" aria-hidden="true" />
             Logout
           </button>
         </div>
       </aside>
 
-      <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white border-b border-gray-200">
+      <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-b border-surface-200">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">SD</div>
-            <span className="font-bold text-gray-800">Waiter</span>
+            <div className="w-8 h-8 rounded-xl bg-ink-900 flex items-center justify-center text-white font-bold text-[13px]" aria-hidden="true">SD</div>
+            <span className="font-bold tracking-tight text-ink-900">Waiter</span>
           </div>
-          <button onClick={handleLogout} className="text-gray-500 hover:text-gray-700 p-2 -mr-1">
-            <LogOut className="w-5 h-5" />
+          <button onClick={handleLogout} aria-label="Log out" className="pressable text-ink-400 hover:text-ink-700 p-2 -mr-1 rounded-xl hover:bg-surface-50 min-w-[40px] min-h-[40px] flex items-center justify-center">
+            <LogOut className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
-        <div className="flex overflow-x-auto px-2 pb-2.5 gap-1">
+        <nav aria-label="Primary mobile" className="flex overflow-x-auto scrollbar-none px-3 pb-2.5 gap-1.5">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium ${
-                  isActive ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-50"
+                `whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold border ${
+                  isActive ? "bg-ink-900 text-white border-ink-900" : "bg-white text-ink-500 border-surface-200"
                 }`
               }
             >
-              <item.icon className="w-3.5 h-3.5" />
+              <item.icon className="w-3.5 h-3.5" aria-hidden="true" />
               {item.label}
             </NavLink>
           ))}
-        </div>
+        </nav>
       </div>
 
-      <main className="flex-1 md:ml-64 mt-20 md:mt-0">
-        <div className="p-4 md:p-8">
+      <main id="main-content" className="flex-1 md:ml-64 mt-20 md:mt-0 min-w-0">
+        <div className="p-4 sm:p-6 md:p-8 max-w-[1200px] mx-auto">
           <Outlet />
         </div>
       </main>

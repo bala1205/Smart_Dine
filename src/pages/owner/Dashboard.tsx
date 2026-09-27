@@ -101,11 +101,11 @@ export default function OwnerDashboard() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">
+      <div className="page-header">
+        <h1>
           {rLoading ? "Dashboard" : restaurant ? restaurant.name : "Dashboard"}
         </h1>
-        <p className="text-gray-500 text-sm">Monitoring your restaurant in real time</p>
+        <p>Monitoring your restaurant in real time</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
@@ -125,10 +125,11 @@ export default function OwnerDashboard() {
       </div>
 
       <div className="bg-white rounded-2xl border border-surface-200 shadow-card">
-        <div className="px-6 py-4 border-b border-surface-100 flex items-center justify-between">
-          <h2 className="font-bold tracking-tight text-ink-900">Live Orders</h2>
-          <Link to="/owner/orders" className="text-sm font-semibold text-brand-600 hover:text-brand-700">
-            View all →
+        <div className="px-5 sm:px-6 py-4 border-b border-surface-100 flex items-center justify-between gap-3">
+          <h2 className="font-bold tracking-tight text-[15px] text-ink-900">Live orders</h2>
+          <Link to="/owner/orders" className="pressable inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:text-brand-600">
+            View all
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>
           </Link>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-6">

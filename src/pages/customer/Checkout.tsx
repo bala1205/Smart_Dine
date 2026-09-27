@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, TriangleAlert, QrCode, ShoppingBag } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { db } from "../../lib/firebase";
@@ -62,7 +62,11 @@ export default function Checkout() {
   if (loading) {
     return (
       <CheckoutShell>
-        <div className="text-center py-16 text-gray-500">Loading checkout...</div>
+        <div className="space-y-3" aria-label="Loading checkout">
+          <div className="skeleton-shimmer rounded-2xl h-20 w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-40 w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-32 w-full" />
+        </div>
       </CheckoutShell>
     );
   }
@@ -71,10 +75,12 @@ export default function Checkout() {
   if (!isAccessAvailable) {
     return (
       <CheckoutShell>
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">🚫</div>
-          <h1 className="text-xl font-bold text-gray-800">Table Currently Unavailable</h1>
-          <p className="text-gray-600 mt-2">Please contact the restaurant staff.</p>
+        <div className="text-center bg-white rounded-2xl border border-surface-200 shadow-card p-8">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+            <TriangleAlert className="w-7 h-7 text-amber-600" strokeWidth={1.75} />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900">Table currently unavailable</h1>
+          <p className="text-sm text-ink-500 mt-2">Please contact the restaurant staff.</p>
         </div>
       </CheckoutShell>
     );
@@ -83,11 +89,13 @@ export default function Checkout() {
   if (!restaurant || !table || !qrToken || !restaurant.isActive || !table.isActive) {
     return (
       <CheckoutShell>
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">🍽️</div>
-          <h1 className="text-xl font-bold text-gray-800">Session Invalid</h1>
-          <p className="text-gray-600 mt-2">Please rescan the QR code to place an order.</p>
-          <Link to="/" className="mt-4 inline-block text-brand-600 font-medium">
+        <div className="text-center bg-white rounded-2xl border border-surface-200 shadow-card p-8">
+          <div className="w-14 h-14 rounded-2xl bg-surface-50 border border-surface-200 flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+            <QrCode className="w-7 h-7 text-ink-400" strokeWidth={1.75} />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900">Session invalid</h1>
+          <p className="text-sm text-ink-500 mt-2">Please rescan the QR code to place an order.</p>
+          <Link to="/" className="mt-4 inline-block text-sm font-semibold text-brand-700 hover:underline underline-offset-2">
             Go back
           </Link>
         </div>
@@ -98,13 +106,15 @@ export default function Checkout() {
   if (count === 0) {
     return (
       <CheckoutShell>
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">🛒</div>
-          <h1 className="text-xl font-bold text-gray-800">Your cart is empty</h1>
-          <p className="text-gray-600 mt-2">Add some items before checkout.</p>
+        <div className="text-center bg-white rounded-2xl border border-surface-200 shadow-card p-8">
+          <div className="w-14 h-14 rounded-2xl bg-surface-50 border border-surface-200 flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+            <ShoppingBag className="w-7 h-7 text-ink-400" strokeWidth={1.75} />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900">Your cart is empty</h1>
+          <p className="text-sm text-ink-500 mt-2">Add some items before checkout.</p>
           <Link
             to={`/menu/${restaurant.id}/${table.id}?token=${qrToken}`}
-            className="mt-4 inline-block text-brand-600 font-medium"
+            className="mt-4 inline-block text-sm font-semibold text-brand-700 hover:underline underline-offset-2"
           >
             Back to menu
           </Link>
@@ -198,27 +208,34 @@ export default function Checkout() {
 
   return (
     <CheckoutShell>
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-700">
-          <ArrowLeft className="w-5 h-5" />
+      <div className="flex items-center gap-3 mb-5">
+        <button
+          onClick={() => navigate(-1)}
+          aria-label="Go back"
+          className="pressable w-10 h-10 rounded-xl bg-white border border-surface-200 hover:border-surface-300 flex items-center justify-center text-ink-500 hover:text-ink-900 shadow-card"
+        >
+          <ArrowLeft className="w-5 h-5" aria-hidden="true" />
         </button>
-        <h1 className="text-xl font-bold text-gray-800">Checkout</h1>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900 leading-none">Checkout</h1>
+          <p className="text-[13px] text-ink-500 mt-1">{count} item{count > 1 ? "s" : ""} • Table {table.tableNumber}</p>
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
-        <div className="font-medium text-gray-800">{restaurant.name}</div>
-        <div className="text-sm text-gray-500 mt-1">Table {table.tableNumber}</div>
+      <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-4 sm:p-5 mb-3.5">
+        <div className="font-bold tracking-tight text-[15px] text-ink-900">{restaurant.name}</div>
+        <div className="text-[13px] text-ink-500 mt-0.5">Table {table.tableNumber} • Dine-in</div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
-        <h2 className="font-semibold text-gray-800 mb-3">Order Items</h2>
-        <div className="space-y-2">
+      <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-4 sm:p-5 mb-3.5">
+        <h2 className="font-bold tracking-tight text-[15px] text-ink-900 mb-3">Order items</h2>
+        <div className="space-y-2.5">
           {lines.map((line) => (
-            <div key={line.menuItemId} className="flex justify-between text-sm">
-              <span className="text-gray-700">
-                {line.name} <span className="text-gray-400">× {line.quantity}</span>
+            <div key={line.menuItemId} className="flex justify-between items-baseline gap-3 text-sm">
+              <span className="text-ink-700 min-w-0">
+                <span className="font-medium">{line.name}</span> <span className="text-ink-400 tabular-nums">× {line.quantity}</span>
               </span>
-              <span className="font-medium text-gray-800">
+              <span className="font-semibold text-ink-900 tabular-nums shrink-0">
                 {formatCurrency(line.price * line.quantity)}
               </span>
             </div>
@@ -226,9 +243,9 @@ export default function Checkout() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
+      <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-4 sm:p-5 mb-3.5">
         <TextArea
-          label="Special Instructions"
+          label="Special instructions"
           placeholder="e.g. Less spicy, no onions..."
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
@@ -239,42 +256,44 @@ export default function Checkout() {
       {(() => {
         const bill = calculateBill(total, restaurant.gstPercent ?? 0, restaurant.serviceChargePercent ?? 0);
         return (
-          <div className="bg-white rounded-xl shadow-sm p-4 mb-4 space-y-1">
-            <div className="flex justify-between text-sm text-gray-600">
+          <div className="bg-white rounded-2xl border border-surface-200 shadow-card p-4 sm:p-5 mb-4 space-y-1.5">
+            <div className="flex justify-between text-sm text-ink-500">
               <span>Subtotal</span>
-              <span>{formatCurrency(bill.subtotal)}</span>
+              <span className="tabular-nums">{formatCurrency(bill.subtotal)}</span>
             </div>
             {bill.gstAmount > 0 && (
-              <div className="flex justify-between text-sm text-gray-600">
+              <div className="flex justify-between text-sm text-ink-500">
                 <span>GST {bill.gstPercent}%</span>
-                <span>{formatCurrency(bill.gstAmount)}</span>
+                <span className="tabular-nums">{formatCurrency(bill.gstAmount)}</span>
               </div>
             )}
             {bill.serviceChargeAmount > 0 && (
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>Service Charge {bill.serviceChargePercent}%</span>
-                <span>{formatCurrency(bill.serviceChargeAmount)}</span>
+              <div className="flex justify-between text-sm text-ink-500">
+                <span>Service charge {bill.serviceChargePercent}%</span>
+                <span className="tabular-nums">{formatCurrency(bill.serviceChargeAmount)}</span>
               </div>
             )}
-            <div className="flex justify-between text-base font-bold text-gray-900 border-t border-gray-100 pt-2 mt-2">
-              <span>Grand Total</span>
-              <span>{formatCurrency(bill.grandTotal)}</span>
+            <div className="flex justify-between text-[15px] font-bold text-ink-900 border-t border-surface-100 pt-2.5 mt-2">
+              <span>Total</span>
+              <span className="tabular-nums">{formatCurrency(bill.grandTotal)}</span>
             </div>
           </div>
         );
       })()}
 
-      <Button onClick={placeOrder} loading={placing} className="w-full py-3 text-base">
-        {placing ? "Placing Order..." : "Place Order"}
-      </Button>
+      <div className="sm:static sticky bottom-4">
+        <Button onClick={placeOrder} loading={placing} size="lg" className="w-full text-[15px]">
+          {placing ? "Placing order..." : "Place order"}
+        </Button>
+      </div>
     </CheckoutShell>
   );
 }
 
 function CheckoutShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gray-50 pb-10">
-      <div className="max-w-lg mx-auto px-4 py-6">{children}</div>
+    <div className="min-h-[100dvh] bg-surface-50 pb-10">
+      <div className="max-w-lg mx-auto px-4 py-5 sm:py-6">{children}</div>
     </div>
   );
 }

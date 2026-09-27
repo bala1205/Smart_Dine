@@ -251,32 +251,34 @@ export default function OwnerMenu() {
             const isLow = enabled && item.stockQuantity <= (item.lowStockThreshold ?? 5) && item.stockQuantity > 0;
             const isOut = enabled && item.stockQuantity <= 0;
             return (
-              <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex gap-4">
+              <div key={item.id} className="bg-white rounded-2xl border border-surface-200 shadow-card p-4 flex gap-3.5 hover-lift">
                 {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.name} className="w-20 h-20 rounded-lg object-cover flex-shrink-0" />
+                  <img src={item.imageUrl} alt={item.name} loading="lazy" className="w-20 h-20 rounded-xl object-cover shrink-0 border border-surface-100 bg-surface-50" />
                 ) : (
-                  <div className="w-20 h-20 rounded-lg bg-gray-100 flex items-center justify-center text-2xl flex-shrink-0">🍽️</div>
+                  <div className="w-20 h-20 rounded-xl bg-surface-50 border border-surface-200 flex items-center justify-center shrink-0" aria-hidden="true">
+                    <svg className="w-7 h-7 text-ink-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8.5v-2m0 9v-2m-7-3.5h14M5 12a7 7 0 0014 0M4 12H2m20 0h-2" opacity={0.9} /><path strokeLinecap="round" d="M7 21h10" /></svg>
+                  </div>
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-semibold text-gray-800 truncate">{item.name}</h3>
-                    <button onClick={() => openEdit(item)} className="text-gray-400 hover:text-gray-600">
-                      <Pencil className="w-4 h-4" />
+                    <h3 className="font-bold tracking-tight text-[15px] text-ink-900 truncate">{item.name}</h3>
+                    <button onClick={() => openEdit(item)} aria-label={`Edit ${item.name}`} className="pressable text-ink-400 hover:text-ink-700 p-1.5 -mr-1 -mt-1 rounded-lg hover:bg-surface-50 min-w-[32px] min-h-[32px] flex items-center justify-center">
+                      <Pencil className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">{catName(item.categoryId)}</p>
+                  <p className="text-xs text-ink-500 mt-0.5">{catName(item.categoryId)}</p>
                   {item.trackStock && (
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Stock: {item.stockQuantity}</span>
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-ink-500 tabular-nums">Stock: {item.stockQuantity}</span>
                       {isOut ? (
-                        <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">OUT OF STOCK</span>
+                        <span className="text-[11px] bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full font-semibold">Out of stock</span>
                       ) : isLow ? (
-                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">LOW STOCK</span>
+                        <span className="text-[11px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">Low stock</span>
                       ) : null}
                     </div>
                   )}
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="font-bold text-gray-900">{formatCurrency(item.price)}</span>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="font-bold text-ink-900 tabular-nums">{formatCurrency(item.price)}</span>
                     <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
                       <input
                         type="checkbox"

@@ -1,11 +1,13 @@
 export function Spinner({ size = 24 }: { size?: number }) {
   return (
     <svg
-      className="animate-spin text-brand-600"
+      className="animate-spin text-brand-600 shrink-0"
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
+      role="presentation"
+      aria-hidden="true"
     >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
@@ -19,9 +21,10 @@ export function Spinner({ size = 24 }: { size?: number }) {
 
 export function PageLoader({ label = "Loading..." }: { label?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-500">
+    <div role="status" aria-live="polite" className="flex flex-col items-center justify-center py-20 gap-3">
       <Spinner size={28} />
-      <span className="text-sm">{label}</span>
+      <span className="text-sm font-medium text-ink-500">{label}</span>
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

@@ -161,10 +161,10 @@ export default function OwnerStaff() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add Staff">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setRole("KITCHEN")} className={`flex-1 py-2 rounded-lg text-sm font-medium border ${role === "KITCHEN" ? "bg-orange-50 border-orange-300 text-orange-700" : "bg-white border-gray-200 text-gray-600"}`}>🍳 Kitchen</button>
-              <button type="button" onClick={() => setRole("WAITER")} className={`flex-1 py-2 rounded-lg text-sm font-medium border ${role === "WAITER" ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600"}`}>🔔 Waiter</button>
+            <span id="staff-role-label" className="block text-[13px] font-semibold text-ink-700 mb-1.5">Role</span>
+            <div className="flex gap-2" role="group" aria-labelledby="staff-role-label">
+              <button type="button" onClick={() => setRole("KITCHEN")} aria-pressed={role === "KITCHEN"} className={`pressable flex-1 py-2.5 min-h-[42px] rounded-xl text-sm font-semibold border ${role === "KITCHEN" ? "bg-orange-50 border-orange-300 text-orange-700" : "bg-white border-surface-200 text-ink-500 hover:border-surface-300"}`}>Kitchen</button>
+              <button type="button" onClick={() => setRole("WAITER")} aria-pressed={role === "WAITER"} className={`pressable flex-1 py-2.5 min-h-[42px] rounded-xl text-sm font-semibold border ${role === "WAITER" ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-surface-200 text-ink-500 hover:border-surface-300"}`}>Waiter</button>
             </div>
           </div>
           <Input

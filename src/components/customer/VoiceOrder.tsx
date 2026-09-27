@@ -229,7 +229,10 @@ export function VoiceOrder({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 id="voice-order-title" className="font-bold tracking-tight text-ink-900 flex items-center gap-2">
-            <span aria-hidden="true">🎙️</span> Voice Order
+            <span className="w-8 h-8 rounded-xl bg-surface-50 border border-surface-200 flex items-center justify-center shrink-0" aria-hidden="true">
+              <Mic className="w-4 h-4 text-ink-500" />
+            </span>
+            Voice order
           </h2>
           <p className="text-sm text-ink-500 mt-1">
             {permissionDenied

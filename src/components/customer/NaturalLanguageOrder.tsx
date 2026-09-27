@@ -98,10 +98,13 @@ export function NaturalLanguageOrder({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 id="nl-title" className="font-bold tracking-tight text-ink-900 flex items-center gap-2">
-            <span aria-hidden="true">✨</span> Ask SmartDine
+            <span className="w-8 h-8 rounded-xl bg-surface-50 border border-surface-200 flex items-center justify-center shrink-0" aria-hidden="true">
+              <Sparkles className="w-4 h-4 text-ink-500" />
+            </span>
+            Ask SmartDine
           </h2>
-          <p className="text-sm text-ink-500 mt-1">Describe what you want — we’ll find it in the menu</p>
-          <p className="text-xs text-ink-400 mt0.5">e.g. “vegetarian under ₹400 for two” or “rendu biryani venum”</p>
+          <p className="text-sm text-ink-500 mt-1.5">Describe what you want — we will find it in the menu</p>
+          <p className="text-xs text-ink-400 mt-1">e.g. “vegetarian under ₹400 for two” or “rendu biryani venum”</p>
         </div>
         {(intent || error) && (
           <button
@@ -121,32 +124,34 @@ export function NaturalLanguageOrder({
         <label htmlFor="nl-input" className="sr-only">
           Describe what you want to order
         </label>
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400" aria-hidden="true" />
-          <input
-            ref={inputRef}
-            id="nl-input"
-            type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              if (!touched) setTouched(true);
-              if (error) setError(null);
-            }}
-            placeholder="I want something spicy under 500 for two..."
-            aria-label="Describe what you want to order"
-            aria-describedby="nl-help"
-            autoComplete="off"
-            maxLength={500}
-            className="w-full pl-10 pr-[96px] py-3 rounded-2xl border border-surface-200 bg-white text-sm placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400 pointer-events-none" aria-hidden="true" />
+            <input
+              ref={inputRef}
+              id="nl-input"
+              type="text"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (!touched) setTouched(true);
+                if (error) setError(null);
+              }}
+              placeholder="I want something spicy under 500 for two..."
+              aria-label="Describe what you want to order"
+              aria-describedby="nl-help"
+              autoComplete="off"
+              maxLength={500}
+              className="w-full pl-10 pr-3.5 py-3 min-h-[46px] rounded-2xl border border-surface-200 bg-white text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+            />
+          </div>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || query.trim().length < 2}
             aria-label="Ask SmartDine"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 flex items-center gap-1.5"
+            className="pressable shrink-0 px-4 py-3 min-h-[46px] rounded-2xl bg-ink-900 text-white text-sm font-semibold hover:bg-ink-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Sparkles className="w-4 h-4" aria-hidden="true" />}
             Ask
           </button>
         </div>

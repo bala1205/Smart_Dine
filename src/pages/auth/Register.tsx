@@ -91,13 +91,13 @@ export default function Register() {
           error={errors.restaurantName?.message}
           {...register("restaurantName")}
         />
-        <Button type="submit" loading={loading} className="w-full">
-          Create Account
+        <Button type="submit" loading={loading} size="lg" className="w-full">
+          Create account
         </Button>
       </form>
-      <p className="mt-6 text-sm text-center text-gray-600">
+      <p className="mt-6 text-sm text-center text-ink-500">
         Already have an account?{" "}
-        <Link to="/login" className="text-brand-600 font-medium hover:underline">
+        <Link to="/login" className="text-brand-700 font-semibold hover:underline underline-offset-2">
           Login
         </Link>
       </p>

@@ -16,6 +16,7 @@ import OwnerStaff from "../pages/owner/Staff";
 import OwnerSettings from "../pages/owner/Settings";
 import OwnerAnalytics from "../pages/owner/Analytics";
 import OwnerReports from "../pages/owner/Reports";
+import OwnerServiceRequests from "../pages/owner/ServiceRequests";
 
 import KitchenLayout from "../layouts/KitchenLayout";
 import KitchenDashboard from "../pages/kitchen/Dashboard";
@@ -62,6 +63,7 @@ export default function AppRoutes() {
         }
       >
         <Route path="dashboard" element={<OwnerDashboard />} />
+        <Route path="service-requests" element={<OwnerServiceRequests />} />
         <Route path="menu" element={<OwnerMenu />} />
         <Route path="categories" element={<OwnerCategories />} />
         <Route path="tables" element={<OwnerTables />} />

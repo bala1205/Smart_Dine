@@ -61,22 +61,22 @@ export default function OwnerOrders() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Orders</h1>
+      <div className="page-header">
+        <h1>Orders</h1>
+        <p>Track and manage all customer orders</p>
+      </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Filter orders">
         {FILTERS.map((f) => (
           <button
             key={f.label}
             onClick={() => setStatus(f.value)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              status === f.value
-                ? "bg-brand-600 text-white"
-                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-            }`}
+            aria-pressed={status === f.value}
+            className="filter-pill"
           >
             {f.label}
             {f.value && (
-              <span className={`ml-1.5 text-xs ${status === f.value ? "text-brand-100" : "text-gray-400"}`}>
+              <span className={`text-xs tabular-nums ${status === f.value ? "text-white/80" : "text-ink-400"}`}>
                 {counts[f.value] ?? 0}
               </span>
             )}
@@ -85,31 +85,39 @@ export default function OwnerOrders() {
       </div>
 
       {loading ? (
-        <div className="text-center text-gray-500 py-16">Loading orders...</div>
+        <div className="space-y-2.5" aria-label="Loading orders">
+          <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+          <div className="skeleton-shimmer rounded-2xl h-[68px] w-full" />
+        </div>
       ) : sorted.length === 0 ? (
-        <EmptyState title="No orders yet" description="Customer orders will appear here in real time." />
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card">
+          <EmptyState title="No orders yet" description="Customer orders will appear here in real time." />
+        </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
+        <div className="bg-white rounded-2xl border border-surface-200 shadow-card divide-y divide-surface-100 overflow-hidden">
           {paged.map((order) => (
             <button
               key={order.id}
               onClick={() => setSelected(order)}
-              className="w-full text-left px-4 py-3 hover:bg-gray-50 flex flex-wrap items-center gap-3"
+              aria-expanded={selected?.id === order.id}
+              className="pressable w-full text-left px-4 sm:px-5 py-4 hover:bg-surface-50 flex flex-wrap items-center gap-3"
             >
               <div className="min-w-28">
-                <div className="font-mono font-bold text-gray-800">
+                <div className="font-mono font-bold text-ink-900 tabular-nums">
                   #{order.id.slice(-4).toUpperCase()}
                 </div>
-                <div className="text-sm text-gray-500">Table {order.tableNumber}</div>
+                <div className="text-[13px] text-ink-500">Table {order.tableNumber}</div>
               </div>
-              <div className="flex-1 min-w-40 text-sm text-gray-600 truncate">
+              <div className="flex-1 min-w-40 text-sm text-ink-500 truncate">
                 {order.specialInstructions || "No special instructions"}
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-ink-400 tabular-nums">
                 <div>{formatDateOnly(order.createdAt)}</div>
                 <div>{formatTime(order.createdAt)}</div>
               </div>
-              <div className="font-semibold text-gray-800">
+              <div className="font-bold text-ink-900 tabular-nums">
                 {formatCurrency(order.totalAmount)}
               </div>
               <StatusBadge status={order.status} />
@@ -222,17 +230,22 @@ function OrderDetailModal({
             {timeline.map((step) => (
               <div key={step.status} className="flex items-center gap-3">
                 <span
-                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    step.time != null ? "bg-brand-600 text-white" : "bg-gray-100 text-gray-400"
+                  aria-hidden="true"
+                  className={`w-5 h-5 rounded-full flex items-center justify-center ${
+                    step.time != null ? "bg-brand-600 text-white" : "bg-surface-50 border border-surface-200 text-transparent"
                   }`}
                 >
-                  {step.time != null ? "✓" : "○"}
+                  {step.time != null ? (
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-ink-400/40" />
+                  )}
                 </span>
-                <span className={step.time != null ? "font-medium text-gray-800" : "text-gray-400"}>
+                <span className={step.time != null ? "font-medium text-ink-900" : "text-ink-400"}>
                   {step.status.charAt(0) + step.status.slice(1).toLowerCase()}
                 </span>
                 {step.time != null && (
-                  <span className="ml-auto text-xs text-gray-400">{formatTime(step.time)}</span>
+                  <span className="ml-auto text-xs text-ink-400 tabular-nums">{formatTime(step.time)}</span>
                 )}
               </div>
             ))}
@@ -240,8 +253,8 @@ function OrderDetailModal({
         </div>
 
         {order.specialInstructions && (
-          <div className="bg-amber-50 rounded-md p-3 text-amber-800">
-            <span className="font-medium">Instructions: </span>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+            <span className="font-semibold">Instructions: </span>
             {order.specialInstructions}
           </div>
         )}
