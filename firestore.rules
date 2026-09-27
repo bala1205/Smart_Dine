@@ -145,22 +145,23 @@ service cloud.firestore {
         // Staff/owner can get/list any request for their restaurant
         allow get: if isOwnerOf(restaurantId) || isWaiterOf(restaurantId) || isKitchenOf(restaurantId);
         allow list: if isOwnerOf(restaurantId) || isWaiterOf(restaurantId) || isKitchenOf(restaurantId)
-          // Customer (unauth) can only LIST where they filter by their own session + table (subscribeToCustomerRequests)
-          // This prevents enumeration via get by ID or unfiltered list.
-          || (request.auth == null
-              && request.query.limit <= 20
-              && request.query.where["customerSessionId"] != null
-              && request.query.where["tableId"] != null);
-        // Waiter/Owner can transition status; customers can cancel own PENDING
+          // Guest customer flow (unauthenticated QR menu): the rules engine
+          // only exposes limit/offset/orderBy for queries — where() filters
+          // are NOT visible to rules — so session/table scoping cannot be
+          // enforced here. Bound the page size instead (all guest queries in
+          // the app carry a limit clause; unbounded queries fail closed).
+          // Writes stay strict and guest cancel is disabled (see update
+          // below), so listed session IDs confer no write capability.
+          || (request.auth == null && request.query.limit <= 20);
+        // Waiter/Owner can transition status. Guests cannot update: the
+        // previous self-cancel allowance echoed back a client-supplied
+        // customerSessionId, which — now that guests can list requests —
+        // would let anyone cancel anyone else's PENDING request. No app
+        // surface uses guest cancel (owner/waiter cancel covers it).
         allow update: if ( (isOwnerOf(restaurantId) || isWaiterOf(restaurantId))
           && serviceRequestStatusCompatible(resource.data.status, request.resource.data.status)
           && request.resource.data.restaurantId == resource.data.restaurantId
           && request.resource.data.tableId == resource.data.tableId
-        ) || (
-          resource.data.status == 'PENDING'
-          && request.resource.data.status == 'CANCELLED'
-          && request.resource.data.customerSessionId == resource.data.customerSessionId
-          && request.resource.data.restaurantId == resource.data.restaurantId
         );
         allow delete: if isOwnerOf(restaurantId);
       }

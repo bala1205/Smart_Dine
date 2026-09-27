@@ -62,7 +62,11 @@ export async function createServiceRequest(input: {
   const customerSessionId = getOrCreateSessionId();
   const col = serviceRequestCol(input.restaurantId);
 
-  // Duplicate prevention: if identical PENDING request exists for same table/session within last 5 minutes, don't create new
+  // Duplicate prevention: if identical PENDING request exists for same table/session within last 5 minutes, don't create new.
+  // NOTE: limit(1) is REQUIRED, not just an optimization. Unauthenticated
+  // guest queries are only allowed by the security rules when they carry a
+  // limit clause (request.query.limit <= 20); without it the query fails
+  // with "Missing or insufficient permissions" before the create ever runs.
   const fiveMinAgo = Timestamp.fromMillis(Date.now() - 5 * 60 * 1000);
   const dupQuery = query(
     col,
@@ -70,7 +74,8 @@ export async function createServiceRequest(input: {
     where("customerSessionId", "==", customerSessionId),
     where("requestType", "==", input.requestType),
     where("status", "==", "PENDING"),
-    where("createdAt", ">=", fiveMinAgo)
+    where("createdAt", ">=", fiveMinAgo),
+    limit(1)
   );
   const dupSnap = await getDocs(dupQuery);
   if (!dupSnap.empty) {
