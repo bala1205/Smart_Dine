@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Mic, MicOff, Loader2, Check, AlertCircle, X } from "lucide-react";
 import { parseVoiceOrder, isVoiceSupported, createSpeechRecognition } from "../../services/voiceOrderService";
-import { resolveVoiceIntent } from "../../services/aiMenuMatcher";
+import { getTranscriptCoverage, resolveVoiceIntent } from "../../services/aiMenuMatcher";
 import { useCart } from "../../context/CartContext";
 import type { MenuItem } from "../../types/menu";
 import type { VoiceState, OrderIntent } from "../../types/aiOrder";
 import { OrderIntentPreview } from "./OrderIntentPreview";
 import { AccessibleStatus } from "./AccessibleStatus";
+import { VOICE_LOCALE, useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
 
 const STATE_LABEL: Record<VoiceState, string> = {
   IDLE: "Ready — tap to speak",
@@ -33,19 +34,21 @@ export function VoiceOrder({
   restaurantId: string;
   menu: MenuItem[];
 }) {
-  const { add } = useCart();
+  const { add, setInstruction } = useCart();
+  const { prefs } = useAdaptivePrefs();
   const [state, setState] = useState<VoiceState>("IDLE");
   const [transcript, setTranscript] = useState("");
   const [intent, setIntent] = useState<OrderIntent | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Language support: English (en-US/en-IN), Tamil (ta-IN), Tanglish (en-IN handles Tanglish well)
-  // Default to en-IN for Tanglish/English, allow user to switch to ta-IN for Tamil script
+  const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
+  const [heardHint, setHeardHint] = useState<string | null>(null);
+  // Language support: English (en-US/en-IN), Tamil (ta-IN), Tanglish (en-IN handles Tanglish well).
+  // Default comes from the adaptive language preference; a previous manual
+  // choice in this browser still wins for backward compatibility.
   const [lang, setLang] = useState<string>(() => {
-    // Try to detect preferred language from browser or previous selection
     const saved = typeof window !== "undefined" ? localStorage.getItem("smartdine_voice_lang") : null;
     if (saved && ["en-US", "en-IN", "ta-IN", "ta"].includes(saved)) return saved;
-    // Default to en-IN for Indian context (handles Tanglish better than en-US)
-    return "en-IN";
+    return VOICE_LOCALE[prefs.language];
   });
   const recognitionRef = useRef<ReturnType<typeof createSpeechRecognition> | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -58,11 +61,19 @@ export function VoiceOrder({
     }
   }, [lang]);
 
+  // Adaptive language preference drives recognition locale (manual picks persist too).
+  useEffect(() => {
+    const mapped = VOICE_LOCALE[prefs.language];
+    setLang((prev) => (prev === mapped ? prev : mapped));
+  }, [prefs.language]);
+
   const reset = useCallback(() => {
     setState("IDLE");
     setTranscript("");
     setIntent(null);
     setError(null);
+    setConfirmMessage(null);
+    setHeardHint(null);
   }, []);
 
   const handleResult = useCallback(
@@ -84,6 +95,15 @@ export function VoiceOrder({
           return;
         }
         setIntent(rawIntent);
+        // Uncertain match? Web Speech gives no confidence scores, so use
+        // transcript-ambiguity: if little of what we matched was actually
+        // said, ask for confirmation instead of trusting it.
+        const coverage = getTranscriptCoverage(t, rawIntent);
+        setHeardHint(
+          rawIntent.items.length > 0 && coverage < 0.5
+            ? `Heard “${t}”. Please double-check the detected items before adding.`
+            : null
+        );
         setState("CONFIRMATION");
       } catch (e: unknown) {
         const msg = (e as Error).message || "Voice ordering is temporarily unavailable.";
@@ -201,21 +221,44 @@ export function VoiceOrder({
 
   const handleAdd = () => {
     if (!intent) return;
-    let added = 0;
+    const addedIds: string[] = [];
     for (const it of intent.items) {
       const menuItem = menu.find((m) => m.id === it.menuItemId);
       if (!menuItem) continue;
       if (!it.available) continue;
       // Use existing cart logic — add with quantity
       add(menuItem, it.quantity);
-      added++;
+      addedIds.push(menuItem.id);
     }
-    if (added > 0) {
+    if (addedIds.length > 0) {
+      // Carry AI-detected notes (e.g. "no onion") into the cart's existing
+      // special-instruction field when exactly one dish was confirmed.
+      const notes = intent.notes?.trim();
+      if (notes && addedIds.length === 1) {
+        setInstruction(addedIds[0], notes.slice(0, 200));
+      }
       // Announce for screen reader
       setState("IDLE");
       setIntent(null);
       setTranscript("");
+      setConfirmMessage(
+        addedIds.length === 1 ? "Added to cart" : `${addedIds.length} items added to cart`
+      );
     }
+  };
+
+  // Tap/keyboard/voice-follow-up answer to "Did you mean …?" — resolves one
+  // ambiguous option straight into the cart (validated against the menu).
+  const handleSelectOption = (menuItemId: string, name: string) => {
+    const menuItem = menu.find((m) => m.id === menuItemId);
+    if (!menuItem) return;
+    if (!menuItem.isAvailable) {
+      setHeardHint(`${name} is currently unavailable. Please pick another option.`);
+      return;
+    }
+    add(menuItem, 1);
+    setConfirmMessage(`${name} added to cart`);
+    reset();
   };
 
   const isListening = state === "LISTENING";
@@ -336,6 +379,18 @@ export function VoiceOrder({
         )}
       </div>
 
+      {confirmMessage && state === "IDLE" && (
+        <p className="mt-3 text-sm font-medium text-green-700" role="status">
+          {confirmMessage}
+        </p>
+      )}
+
+      {heardHint && state === "CONFIRMATION" && (
+        <p className="mt-3 text-[13px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2" role="status">
+          {heardHint}
+        </p>
+      )}
+
       {showPreview && intent && (
         <OrderIntentPreview
           intent={intent}
@@ -344,6 +399,7 @@ export function VoiceOrder({
           onCancel={reset}
           onEdit={reset}
           ambiguous={intent.ambiguous}
+          onSelectOption={handleSelectOption}
         />
       )}
 
@@ -361,7 +417,7 @@ export function VoiceOrder({
             className="flex-1 py-2.5 rounded-xl bg-surface-50 border border-surface-200 text-ink-500 text-sm"
             aria-label="Type order instead"
           >
-            ⌨️ Type instead
+            Type instead
           </button>
         </div>
       )}

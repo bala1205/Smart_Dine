@@ -252,5 +252,79 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
   const dedup = new Map<string, number>();
   for (const r of result) dedup.set(r.name, (dedup.get(r.name) || 0) + r.quantity);
   const items = Array.from(dedup.entries()).map(([name, quantity]) => ({ name, quantity: Math.min(quantity, 20) })).slice(0, 10);
-  return { items, notes: "", ambiguous: [], transcript };
+
+  // Third pass: partial-word recovery for uncertain/partial speech
+  // ("chicken bri..."). A transcript token (len >= 3) that is a STRICT prefix
+  // of a menu-name token (never an equal word) suggests the dish. Exactly one
+  // candidate dish -> add it; several -> ambiguous "Did you mean …?" entry.
+  // Never silently adds when unclear; never touches already-matched items.
+  const ambiguous: VoiceOrderResult["ambiguous"] = [];
+  if (items.length === 0) {
+    const allNameTokens = new Set<string>();
+    for (const mn of menuNorm) {
+      for (const w of mn.normSingular.split(/\s+/).filter(Boolean)) allNameTokens.add(w);
+    }
+    const candidateIds = new Map<string, { name: string; word: string }>();
+    const toks = lowerSingular
+      .split(/\s+/)
+      .filter((t) => Boolean(t) && !TAMIL_STOP_WORDS.has(t));
+    toks.forEach((tok) => {
+      if (tok.length < 3 || allNameTokens.has(tok)) return;
+      for (const mn of menuNorm) {
+        if (used.has(mn.item.id) || candidateIds.has(mn.item.id)) continue;
+        const nameToks = mn.normSingular.split(/\s+/).filter(Boolean);
+        if (nameToks.some((w) => w.length > tok.length && w.startsWith(tok))) {
+          candidateIds.set(mn.item.id, { name: mn.item.name, word: tok });
+        }
+      }
+    });
+    if (candidateIds.size === 1) {
+      const [id, cand] = Array.from(candidateIds.entries())[0];
+      void id;
+      const beforeIdx = toks.indexOf(cand.word) - 1;
+      const q = beforeIdx >= 0 ? toNum(toks[beforeIdx]) : null;
+      items.push({ name: cand.name, quantity: q ?? 1 });
+    } else if (candidateIds.size > 1) {
+      const byWord = new Map<string, string[]>();
+      for (const cand of candidateIds.values()) {
+        const list = byWord.get(cand.word) || [];
+        list.push(cand.name);
+        byWord.set(cand.word, list);
+      }
+      for (const [word, names] of byWord) {
+        const unique = Array.from(new Set(names)).slice(0, 5);
+        if (unique.length > 1) ambiguous.push({ query: word, options: unique });
+      }
+    }
+  }
+  return { items, notes: "", ambiguous: ambiguous.slice(0, 3), transcript };
+}
+
+/**
+ * How much of the CONFIRMED item names actually appears in the transcript
+ * (0..1). Low coverage on a non-empty match means the match is shaky —
+ * callers should ask "Did you mean …?" instead of trusting it.
+ * Pure helper (unit tested). Web Speech provides no confidence values, so
+ * transcript-ambiguity is the signal.
+ */
+export function getTranscriptCoverage(transcript: string, intent: OrderIntent): number {
+  const singular = (s: string) => (s.endsWith("s") && s.length > 3 ? s.slice(0, -1) : s);
+  const toks = new Set(
+    transcript
+      .toLowerCase()
+      .replace(/[^a-z0-9\u0B80-\u0BFF\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(singular)
+  );
+  if (toks.size === 0 || intent.items.length === 0) return 0;
+  let matched = 0;
+  let total = 0;
+  for (const it of intent.items) {
+    for (const w of it.name.toLowerCase().split(/\s+/).filter(Boolean)) {
+      total++;
+      if (toks.has(w) || toks.has(singular(w))) matched++;
+    }
+  }
+  return total === 0 ? 0 : matched / total;
 }

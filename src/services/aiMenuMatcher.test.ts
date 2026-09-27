@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveVoiceIntent, resolveNaturalIntent, fallbackParseVoiceClient } from "./aiMenuMatcher";
+import { resolveVoiceIntent, resolveNaturalIntent, fallbackParseVoiceClient, getTranscriptCoverage } from "./aiMenuMatcher";
 import type { MenuItem } from "../types/menu";
 import type { VoiceOrderResult, NaturalLanguageResult } from "../types/aiOrder";
 
@@ -353,5 +353,60 @@ describe("fallbackParseVoiceClient", () => {
     const res = fallbackParseVoiceClient("இரண்டு சிக்கன் பிரியாணி வேண்டும்", menu);
     const chicken = res.items.find((x) => x.name === "Chicken Biryani");
     expect(chicken?.quantity).toBe(2);
+  });
+
+  it("partial speech, single candidate — 'rendu bir' adds the one biryani", () => {
+    const menu = makeMenu([{ id: "m1", name: "Chicken Biryani", price: 250 }]);
+    const res = fallbackParseVoiceClient("rendu bir", menu);
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0].name).toBe("Chicken Biryani");
+    expect(res.items[0].quantity).toBe(2);
+  });
+
+  it("partial speech, several candidates — 'chicken bir' asks instead of guessing", () => {
+    const menu = makeMenu();
+    const res = fallbackParseVoiceClient("chicken bir", menu);
+    // Never silently adds when unclear
+    expect(res.items).toHaveLength(0);
+    expect(res.ambiguous.length).toBeGreaterThan(0);
+    const opts = res.ambiguous[0].options;
+    expect(opts).toContain("Chicken Biryani");
+    expect(opts.length).toBeGreaterThan(1);
+  });
+
+  it("exact full words never trigger partial recovery", () => {
+    const menu = makeMenu([
+      { id: "m1", name: "Chicken Biryani", price: 250 },
+      { id: "m2", name: "Al Fahm Chicken", price: 300 },
+      { id: "m3", name: "Burger & Fries Combo", price: 200 },
+      { id: "m4", name: "Butter Chicken", price: 220 },
+      { id: "m5", name: "Chettinad Chicken Curry", price: 240 },
+    ]);
+    const res = fallbackParseVoiceClient("Chicken Biryani", menu);
+    expect(res.items).toHaveLength(1);
+    expect(res.ambiguous).toHaveLength(0);
+  });
+});
+
+describe("getTranscriptCoverage", () => {
+  it("exact transcript scores 1", () => {
+    const cov = getTranscriptCoverage("2 chicken biryani", {
+      items: [{ menuItemId: "m1", quantity: 2, name: "Chicken Biryani", price: 250, available: true }],
+      notes: "",
+    });
+    expect(cov).toBe(1);
+  });
+
+  it("unrelated transcript scores 0", () => {
+    const cov = getTranscriptCoverage("hello friend", {
+      items: [{ menuItemId: "m1", quantity: 1, name: "Chicken Biryani", price: 250, available: true }],
+      notes: "",
+    });
+    expect(cov).toBe(0);
+  });
+
+  it("empty transcript or items scores 0", () => {
+    expect(getTranscriptCoverage("", { items: [], notes: "" })).toBe(0);
+    expect(getTranscriptCoverage("biryani", { items: [], notes: "" })).toBe(0);
   });
 });

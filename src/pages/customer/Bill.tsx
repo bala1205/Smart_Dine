@@ -8,6 +8,8 @@ import { escapeHtml } from "../../utils/sanitize";
 import { calculateBill } from "../../utils/billing";
 import { PageLoader } from "../../components/common/Spinner";
 import { Button } from "../../components/common/Button";
+import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
+import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
 import { Download, Share2, Split, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import type { Order, OrderItem } from "../../types/order";
@@ -118,6 +120,7 @@ export default function DigitalBill() {
   const [items, setItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSplit, setShowSplit] = useState(false);
+  const { prefs } = useAdaptivePrefs();
 
   useEffect(() => {
     if (!restaurantId || !orderId) return;
@@ -281,7 +284,19 @@ export default function DigitalBill() {
                 : "bg-amber-50 border-amber-200"
             }`}
           >
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-500">Payment status</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-500 flex items-center justify-center gap-2">
+              Payment status
+              {prefs.listen && (
+                <ReadAloudButton
+                  text={
+                    currentOrder.paymentStatus === "PAID"
+                      ? `Bill paid. Total ${Math.round(bill.grandTotal)} rupees.`
+                      : `Payment pending. Total ${Math.round(bill.grandTotal)} rupees.`
+                  }
+                  label="bill payment status"
+                />
+              )}
+            </p>
             {currentOrder.paymentStatus === "PAID" ? (
               <>
                 <p className="mt-1 text-[15px] font-bold tracking-tight text-green-700">Paid</p>

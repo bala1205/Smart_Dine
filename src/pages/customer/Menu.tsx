@@ -15,6 +15,9 @@ import { ErrorState, EmptyState } from "../../components/common/States";
 import ServiceRequestPanel from "../../components/customer/ServiceRequestPanel";
 import { VoiceOrder } from "../../components/customer/VoiceOrder";
 import { NaturalLanguageOrder } from "../../components/customer/NaturalLanguageOrder";
+import { AdaptivePrefsStrip } from "../../components/customer/AdaptivePrefsStrip";
+import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
+import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
 
 export default function CustomerMenu() {
   const { restaurantId = "", tableId = "" } = useParams();
@@ -61,6 +64,12 @@ export default function CustomerMenu() {
   }, [restaurantId, tableId, token]);
 
   const { add, count, total, setOpen, lines, setQuantity } = useCart();
+  const { prefs, setPrefs } = useAdaptivePrefs();
+
+  function scrollToId(id: string) {
+    if (typeof document === "undefined") return;
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   const activeItems = useMemo(() => {
     let list = items;
@@ -195,7 +204,15 @@ export default function CustomerMenu() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-surface-50/95 backdrop-blur supports-[backdrop-filter]:bg-surface-50/85 py-3">
+      <AdaptivePrefsStrip
+        onSpeak={() => scrollToId("sd-voice")}
+        onBrowse={() => {
+          setPrefs({ voiceHints: false });
+          scrollToId("sd-search");
+        }}
+      />
+
+      <div id="sd-search" className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-surface-50/95 backdrop-blur supports-[backdrop-filter]:bg-surface-50/85 py-3 scroll-mt-2">
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400 pointer-events-none" aria-hidden="true" />
           <input
@@ -255,7 +272,7 @@ export default function CustomerMenu() {
       )}
 
       {/* AI-assisted ordering — voice + natural language, mobile-first, accessible */}
-      <div className="max-w-lg mx-auto px-4 py-3 space-y-4">
+      <div id="sd-voice" className="max-w-lg mx-auto px-4 py-3 space-y-4 scroll-mt-2">
         <div className="sr-only" aria-live="polite">
           SmartDine AI ordering available: voice and text
         </div>
@@ -304,7 +321,15 @@ export default function CustomerMenu() {
                   <p className="text-[13px] text-ink-500 line-clamp-2 mt-1 leading-relaxed">{item.description}</p>
                 )}
                 <div className="flex items-center justify-between gap-2 mt-3">
-                  <span className="font-bold text-ink-900 text-[15px] tabular-nums">{formatCurrency(item.price)}</span>
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="font-bold text-ink-900 text-[15px] tabular-nums">{formatCurrency(item.price)}</span>
+                    {prefs.listen && (
+                      <ReadAloudButton
+                        text={`${item.name}, ${Number.isFinite(item.price) ? Math.round(item.price) : item.price} rupees${available ? "" : ", not available"}`}
+                        label={`${item.name} price`}
+                      />
+                    )}
+                  </span>
                   {available ? (
                     (() => {
                       const line = lines.find((l) => l.menuItemId === item.id);
@@ -458,6 +483,7 @@ async function isClaimedByAnotherSession(
 
 function CartDrawer({ menuItems }: { menuItems: import("../../types/menu").MenuItem[] }) {
   const { isOpen, setOpen, lines, total, count, setQuantity, remove, setInstruction } = useCart();
+  const { prefs } = useAdaptivePrefs();
   const navigate = useNavigate();
   const [showInstructions, setShowInstructions] = useState<string | null>(null);
 
@@ -575,8 +601,16 @@ function CartDrawer({ menuItems }: { menuItems: import("../../types/menu").MenuI
             <span>Subtotal</span>
             <span className="font-semibold text-ink-900 tabular-nums">{formatCurrency(total)}</span>
           </div>
-          <div className="flex justify-between text-[15px] font-bold text-ink-900">
-            <span>Total</span>
+          <div className="flex justify-between items-center text-[15px] font-bold text-ink-900">
+            <span className="flex items-center gap-2">
+              Total
+              {prefs.listen && (
+                <ReadAloudButton
+                  text={`Cart total ${Math.round(total)} rupees, ${count} item${count === 1 ? "" : "s"}`}
+                  label="cart total"
+                />
+              )}
+            </span>
             <span className="tabular-nums">{formatCurrency(total)}</span>
           </div>
           {hasUnavailable && lines.length > 0 && (

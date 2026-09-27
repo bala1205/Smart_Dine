@@ -227,6 +227,36 @@ p {
   background: transparent;
 }
 
+/* === ADAPTIVE DINING (optional customer preferences, data attrs on <html>) === */
+html[data-large-text="on"] {
+  font-size: 112.5%;
+}
+html[data-large-text="on"] body {
+  line-height: 1.65;
+}
+html[data-large-text="on"] .max-w-lg {
+  max-width: 36rem;
+}
+
+html[data-high-contrast="on"] body {
+  background: #ffffff;
+  color: #000000;
+}
+html[data-high-contrast="on"] .text-ink-500,
+html[data-high-contrast="on"] .text-ink-400 {
+  color: #334155 !important;
+}
+html[data-high-contrast="on"] .bg-surface-50 {
+  background-color: #f1f5f9 !important;
+}
+html[data-high-contrast="on"] .border-surface-200,
+html[data-high-contrast="on"] .border-surface-100 {
+  border-color: #0f172a !important;
+}
+html[data-high-contrast="on"] *:focus-visible {
+  outline-width: 3px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

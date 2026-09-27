@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import AppRoutes from "./routes/AppRoutes";
 import { AuthProvider } from "./hooks/useAuth";
 import { CartProvider } from "./context/CartContext";
+import { AdaptivePrefsProvider } from "./context/AdaptivePrefsContext";
 import "./index.css";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
@@ -16,8 +17,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <CartProvider>
-          <AppRoutes />
-          <Toaster position="top-center" richColors />
+          <AdaptivePrefsProvider>
+            <AppRoutes />
+            <Toaster position="top-center" richColors />
+          </AdaptivePrefsProvider>
         </CartProvider>
       </AuthProvider>
     </BrowserRouter>

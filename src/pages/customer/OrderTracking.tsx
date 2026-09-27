@@ -12,6 +12,8 @@ import { useRestaurant } from "../../hooks/useRestaurant";
 import { formatCurrency, formatTime } from "../../utils/formatting";
 import { STATUS_LABELS, StatusBadge } from "../../components/common/StatusBadge";
 import { PageLoader } from "../../components/common/Spinner";
+import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
+import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
 import type { Order, OrderItem, OrderStatus } from "../../types/order";
 
 const STEPS: OrderStatus[] = ["PLACED", "PREPARING", "READY", "SERVED"];
@@ -25,6 +27,7 @@ export default function OrderTracking() {
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
   const [items, setItems] = useState<OrderItem[]>([]);
   const [error, setError] = useState(false);
+  const { prefs } = useAdaptivePrefs();
 
   useEffect(() => {
     if (!orderId || !restaurantId || !token) {
@@ -111,8 +114,14 @@ export default function OrderTracking() {
             {restaurant?.name ? `${restaurant.name} • ` : ""}Table {order.tableNumber} • Placed at{" "}
             {formatTime(order.createdAt)}
           </p>
-          <div className="mt-3 flex justify-center" role="status" aria-live="polite">
+          <div className="mt-3 flex justify-center items-center gap-2" role="status" aria-live="polite">
             <StatusBadge status={order.status} pulse />
+            {prefs.listen && (
+              <ReadAloudButton
+                text={`Order status: ${STATUS_LABELS[order.status]}. Table ${order.tableNumber}.`}
+                label="order status"
+              />
+            )}
           </div>
         </div>
 

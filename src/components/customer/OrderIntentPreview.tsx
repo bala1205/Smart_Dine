@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { formatCurrency } from "../../utils/formatting";
 import type { OrderIntent, NaturalLanguageIntent } from "../../types/aiOrder";
 import type { MenuItem } from "../../types/menu";
@@ -9,6 +10,7 @@ export function OrderIntentPreview({
   onCancel,
   onEdit,
   ambiguous,
+  onSelectOption,
 }: {
   intent: OrderIntent;
   menu: MenuItem[];
@@ -16,6 +18,8 @@ export function OrderIntentPreview({
   onCancel: () => void;
   onEdit?: () => void;
   ambiguous?: OrderIntent["ambiguous"];
+  /** Resolve one ambiguous option (tap / keyboard / voice follow-up). */
+  onSelectOption?: (menuItemId: string, name: string) => void;
 }) {
   const hasItems = intent.items.length > 0;
   const hasAmbiguousItems = !!(ambiguous && ambiguous.length > 0);
@@ -42,19 +46,22 @@ export function OrderIntentPreview({
           {ambiguous.map((a: { query: string; options: Array<{ id: string; name: string }> }) => (
             <div key={a.query} className="bg-warning-50 border border-warning-100 rounded-xl p-3">
               <p className="text-sm font-medium text-warning-700" id={`ambig-${a.query}`}>
-                Which {a.query} would you like?
+                Did you mean one of these{ a.query ? ` for “${a.query}”` : ""}?
               </p>
               <div className="flex flex-wrap gap-2 mt-2" role="group" aria-labelledby={`ambig-${a.query}`}>
                 {a.options.map((opt: { id: string; name: string }) => (
-                  <span
+                  <button
                     key={opt.id}
-                    className="px-3 py-1.5 rounded-full bg-white border border-surface-200 text-sm font-medium text-ink-700"
+                    type="button"
+                    onClick={() => onSelectOption?.(opt.id, opt.name)}
+                    aria-label={`Select ${opt.name}`}
+                    className="pressable px-3 py-2 min-h-[38px] rounded-full bg-white border border-surface-200 text-sm font-semibold text-ink-700 hover:border-brand-300 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                   >
                     {opt.name}
-                  </span>
+                  </button>
                 ))}
               </div>
-              <p className="text-xs text-warning-600 mt-1">Please specify, e.g. "Chicken Biryani"</p>
+              <p className="text-xs text-warning-600 mt-1">Tap an option, or say / type it — e.g. “Chicken Biryani”.</p>
             </div>
           ))}
         </div>
@@ -195,7 +202,7 @@ export function NaturalIntentPreview({
                   className="w-8 h-8 rounded-lg bg-white border border-surface-200 text-ink-500 hover:bg-danger-50 hover:text-danger-600 hover:border-danger-200 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-500"
                   title="Remove"
                 >
-                  <span aria-hidden="true" className="text-sm">✕</span>
+                  <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               </span>
             </div>
