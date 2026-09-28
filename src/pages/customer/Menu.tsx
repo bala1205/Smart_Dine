@@ -17,6 +17,7 @@ import ServiceRequestPanel from "../../components/customer/ServiceRequestPanel";
 import { VoiceOrder } from "../../components/customer/VoiceOrder";
 import { NaturalLanguageOrder } from "../../components/customer/NaturalLanguageOrder";
 import { AdaptivePrefsStrip } from "../../components/customer/AdaptivePrefsStrip";
+import { SmartDineAIChat } from "../../components/customer/SmartDineAIChat";
 import { ListenAnnouncer } from "../../components/customer/ListenAnnouncer";
 import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
 import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
@@ -334,6 +335,14 @@ export default function CustomerMenu() {
         <VoiceOrder restaurantId={restaurantId} menu={items} />
         <NaturalLanguageOrder restaurantId={restaurantId} menu={items} categories={categories} />
       </section>
+
+      <SmartDineAIChat
+        restaurantId={restaurantId}
+        menu={items}
+        categories={categories}
+        restaurant={restaurant}
+        tableNumber={table?.tableNumber ?? null}
+      />
 
       <section aria-label={activeCat === "all" ? `All menu items, ${activeItems.length} shown` : `Menu items, ${activeItems.length} shown`} className="max-w-lg mx-auto px-4 py-4 space-y-3">
         {activeItems.length === 0 && (

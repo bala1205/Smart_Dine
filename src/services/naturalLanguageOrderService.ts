@@ -42,9 +42,13 @@ const ORDER_TRIGGERS = ["give", "kudu", "order", "venum", "vendum", "pannu", "pa
 const QUESTION_FILLER = new Set([
   "what", "which", "list", "show", "me", "the", "a", "an", "do", "does", "you", "your",
   "have", "has", "got", "is", "are", "there", "here", "any", "many", "much", "price",
-  "cost", "rate", "how", "of", "for", "in", "on", "my", "enna", "irukku", "please",
+  "cost", "rate", "how", "of", "for", "in", "on", "my", "enna", "irukku", "iruku", "iruka",
+  "kidaikuma", "evlo", "evalavu", "please",
   "available", "availability", "stock", "cheapest", "cheap", "options", "option", "menu",
   "items", "item", "dishes", "dish", "food", "things",
+  // Tanglish/Tamil question particles and locatives (never dish words).
+  "ah", "aa", "aah", "la", "lae", "illa",
+  "இருக்கு", "இருக்கா", "எவ்வளவு", "விலை", "கிடைக்குமா",
 ]);
 
 function questionRemainder(query: string): string {
@@ -58,7 +62,7 @@ const DRINK_KEYS = ["juice", "coffee", "tea", "drink", "shake", "mojito", "soda"
 const DESSERT_KEYS = ["dessert", "cake", "ice cream", "icecream", "pastry", "brownie"];
 
 /** Generic scopes resolve against real category/item words — never invented. */
-function scopeHit(scope: string, hay: string): boolean {
+export function scopeHit(scope: string, hay: string): boolean {
   const s = scope.trim();
   if (s.length < 3) return false;
   const sing = s.endsWith("s") && s.length > 3 ? s.slice(0, -1) : s;
@@ -90,6 +94,15 @@ function priceOf(m: MenuItem): number {
   return Number.isFinite(m.price) ? m.price : 0;
 }
 
+/** Answer language for deterministic menu Q&A (chat localizes framing). */
+export type AnswerLang = "en" | "tanglish" | "ta";
+
+function pickLang<T>(lang: AnswerLang, en: T, tanglish: T, ta: T): T {
+  if (lang === "ta") return ta;
+  if (lang === "tanglish") return tanglish;
+  return en;
+}
+
 /**
  * Tries to answer a menu question deterministically. Returns null when the
  * input is an order (or unanswerable) so order parsing handles it.
@@ -97,7 +110,8 @@ function priceOf(m: MenuItem): number {
 export function answerMenuQuestion(
   query: string,
   menu: MenuItem[],
-  catById?: Map<string, string>
+  catById?: Map<string, string>,
+  lang: AnswerLang = "en"
 ): NaturalLanguageResult | null {
   if (menu.length === 0) return null;
   const catNameOf = (m: MenuItem) => catById?.get(m.categoryId) || "";
@@ -106,8 +120,8 @@ export function answerMenuQuestion(
   const isOrder = hasWord(...ORDER_TRIGGERS);
   const remainder = questionRemainder(query);
 
-  // Price question: "How much is Mutton Biriyani?"
-  if (!isOrder && (hasWord("how much", "price", "cost", "rate") || lower.includes(" how much "))) {
+  // Price question: "How much is Mutton Biriyani?" / "mutton biriyani evlo"
+  if (!isOrder && (hasWord("how much", "price", "cost", "rate", "evlo", "evalavu", "எவ்வளவு", "விலை") || lower.includes(" how much "))) {
     const hit = findMenuMatch(remainder, menu);
     if (hit.kind === "match") {
       const m = hit.item;
@@ -115,14 +129,19 @@ export function answerMenuQuestion(
         matches: [],
         noMatch: false,
         query,
-        answer: `${m.name} costs ${formatCurrency(priceOf(m))}.`,
+        answer: pickLang(
+          lang,
+          `${m.name} costs ${formatCurrency(priceOf(m))}.`,
+          `${m.name} price ${formatCurrency(priceOf(m))}.`,
+          `${m.name} விலை ${formatCurrency(priceOf(m))}.`
+        ),
       };
     }
     return null;
   }
 
   // Availability question: "Is Hyderabadi Chicken Dum Biriyani available?"
-  if (!isOrder && hasWord("available", "availability", "stock")) {
+  if (!isOrder && hasWord("available", "availability", "stock", "kidaikuma", "கிடைக்குமா", "iruka", "iruku", "இருக்கு", "இருக்கா")) {
     const hit = findMenuMatch(remainder, menu);
     if (hit.kind === "match") {
       const m = hit.item;
@@ -132,15 +151,25 @@ export function answerMenuQuestion(
         noMatch: false,
         query,
         answer: ok
-          ? `Yes, ${m.name} is available at ${formatCurrency(priceOf(m))}.`
-          : `No, ${m.name} is currently unavailable.`,
+          ? pickLang(
+              lang,
+              `Yes, ${m.name} is available at ${formatCurrency(priceOf(m))}.`,
+              `Yes, ${m.name} available. Price ${formatCurrency(priceOf(m))}.`,
+              `ஆம், ${m.name} கிடைக்கும். விலை ${formatCurrency(priceOf(m))}.`
+            )
+          : pickLang(
+              lang,
+              `No, ${m.name} is currently unavailable.`,
+              `${m.name} currently illa.`,
+              `${m.name} தற்போது கிடைக்கவில்லை.`
+            ),
       };
     }
     return null;
   }
 
-  // Cheapest question: "What is the cheapest dosa?"
-  if (hasWord("cheapest", "cheap")) {
+  // Cheapest question: "What is the cheapest dosa?" / "குறைந்த விலை தோசை எது?"
+  if (hasWord("cheapest", "cheap", "kuraintha", "குறைந்த", "malivana", "மலிவான")) {
     const cands = scopeFilter(remainder, menu, catNameOf).filter((m) => m.isAvailable === true);
     if (cands.length > 0) {
       cands.sort((a, b) => priceOf(a) - priceOf(b));
@@ -149,7 +178,12 @@ export function answerMenuQuestion(
         matches: [{ name: win.name, quantity: 1 }],
         noMatch: false,
         query,
-        answer: `The cheapest option is ${win.name} at ${formatCurrency(priceOf(win))}.`,
+        answer: pickLang(
+          lang,
+          `The cheapest option is ${win.name} at ${formatCurrency(priceOf(win))}.`,
+          `Cheapest: ${win.name}, ${formatCurrency(priceOf(win))}.`,
+          `மலிவானது ${win.name}, ${formatCurrency(priceOf(win))}.`
+        ),
       };
     }
     return null;
@@ -174,7 +208,12 @@ export function answerMenuQuestion(
       matches: shown.map((m) => ({ name: m.name, quantity: 1 })),
       noMatch: false,
       query,
-      answer: `Found ${cands.length} ${label} item${cands.length === 1 ? "" : "s"}: ${fullList}.`,
+      answer: pickLang(
+        lang,
+        `Found ${cands.length} ${label} item${cands.length === 1 ? "" : "s"}: ${fullList}.`,
+        `${cands.length} ${label} iruku: ${fullList}.`,
+        `${cands.length} ${label} கிடைக்கிறது: ${fullList}.`
+      ),
     };
   }
 

@@ -266,6 +266,11 @@ const TAMIL_DISH_ALIASES: Record<string, string> = {
   "கறி": "curry",
   "மசாலா": "masala",
   "பட்டர்": "butter",
+  "வெஜ்": "veg",
+  "சைவ": "veg",
+  "டெசர்ட்": "dessert",
+  "டிரிங்க்ஸ்": "drinks",
+  "டிரிங்க்": "drinks",
 };
 
 // Common Tamil/Tanglish conversational/order words to remove before matching (stop words)
@@ -283,7 +288,7 @@ const PLATE_WORDS = new Set([
   "plate", "plates", "thattu", "thattugal", "தட்டு", "தட்டுகள்", "பிளேட்",
 ]);
 
-function transliterateTamilFoodWords(s: string): string {
+export function transliterateTamilFoodWords(s: string): string {
   let out = s;
   for (const [tamil, eng] of Object.entries(TAMIL_DISH_ALIASES)) {
     // Replace Tamil dish word with English equivalent for matching against English menu
@@ -294,7 +299,34 @@ function transliterateTamilFoodWords(s: string): string {
 }
 
 // Client-side deterministic fallback for voice — mirrors server fallbackParseVoice
+const TENS_WORDS: Record<string, number> = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+const ONES_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+};
+
+/**
+ * Expands spoken tens ("sixty five" → "65", "twenty" → "20") so dishes like
+ * "Chicken 65" match speech. Quantities still clamp to 1–20 downstream.
+ * Pure — unit tested.
+ */
+export function expandNumberWords(text: string): string {
+  let out = ` ${text} `;
+  out = out.replace(
+    /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\s+(one|two|three|four|five|six|seven|eight|nine)\b/gi,
+    (_m, t: string, o: string) => ` ${TENS_WORDS[t.toLowerCase()] + ONES_WORDS[o.toLowerCase()]} `
+  );
+  out = out.replace(
+    /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/gi,
+    (m) => ` ${TENS_WORDS[m.toLowerCase()]} `
+  );
+  return out.replace(/\s+/g, " ").trim();
+}
+
 export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): VoiceOrderResult {
+  transcript = expandNumberWords(transcript);
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0B80-\u0BFF\s]/g, " ").trim();
   const singular = (s: string) => (s.endsWith("s") && s.length > 3 ? s.slice(0, -1) : s);
   // First transliterate Tamil dish words to English for menu matching
@@ -309,11 +341,12 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
   const rawTokens = lower.split(/\s+/).filter((t) => !TAMIL_STOP_WORDS.has(t) && Boolean(t));
   const tamilMap: Record<string, number> = {
     // Tanglish / Tamil numerals
-    oru: 1, onnu: 1, onru: 1, rendu: 2, randu: 2, munnu: 3, moonru: 3, moondru: 3, naalu: 4, ainthu: 5, aaru: 6, aru: 6, elu: 7, ezhu: 7, ettu: 8, onpathu: 9, onbathu: 9, pathu: 10, pattu: 10,
+    oru: 1, onnu: 1, onru: 1, rendu: 2, randu: 2, munnu: 3, moonnu: 3, moonu: 3, moonru: 3, moondru: 3, naalu: 4, ainthu: 5, anju: 5, aaru: 6, aru: 6, elu: 7, ezhu: 7, ettu: 8, onpathu: 9, onbathu: 9, pathu: 10, pattu: 10,
     // Tamil script
     "ஒன்று": 1, "ஒரு": 1, "இரண்டு": 2, "ரெண்டு": 2, "மூன்று": 3, "நான்கு": 4, "ஐந்து": 5, "ஆறு": 6, "ஏழு": 7, "எட்டு": 8, "ஒன்பது": 9, "பத்து": 10,
     // English
     one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
     // Additional Tanglish variants (rendu/randu already above)
     irandu: 2, mudu: 3,
   };
