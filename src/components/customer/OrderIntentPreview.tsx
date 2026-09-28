@@ -1,7 +1,17 @@
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { formatCurrency } from "../../utils/formatting";
 import type { OrderIntent, NaturalLanguageIntent } from "../../types/aiOrder";
 import type { MenuItem } from "../../types/menu";
+
+/** Move screen-reader focus into a freshly shown confirmation result. */
+function useFocusOnShow<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  return ref;
+}
 
 export function OrderIntentPreview({
   intent,
@@ -29,13 +39,16 @@ export function OrderIntentPreview({
     const m = menu.find((x) => x.id === it.menuItemId);
     return sum + (m ? m.price * it.quantity : 0);
   }, 0);
+  const dialogRef = useFocusOnShow<HTMLDivElement>();
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby="intent-title"
-      className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4"
+      className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4 focus-visible:outline-none"
     >
       <h3 id="intent-title" className="font-bold text-ink-900">
         {hasItems ? "Detected order" : "No items detected"}
@@ -165,9 +178,10 @@ export function NaturalIntentPreview({
   onCancel: () => void;
   onRemove?: (id: string) => void;
 }) {
+  const resultRef = useFocusOnShow<HTMLDivElement>();
   if (intent.noMatch) {
     return (
-      <div className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4" role="alert">
+      <div ref={resultRef} tabIndex={-1} className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4 focus-visible:outline-none" role="alert">
         <h3 className="font-bold text-ink-900">No match</h3>
         <p className="text-sm text-ink-500 mt-1">{intent.reason || "No matching item is currently available."}</p>
         <button
@@ -187,7 +201,7 @@ export function NaturalIntentPreview({
   }, 0);
 
   return (
-    <div className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4" role="dialog" aria-modal="true" aria-labelledby="nl-title">
+    <div ref={resultRef} tabIndex={-1} className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4 focus-visible:outline-none" role="dialog" aria-modal="true" aria-labelledby="nl-title">
       <h3 id="nl-title" className="font-bold text-ink-900">Suggestions for you</h3>
       <p className="text-xs text-ink-500 mt-1">Tap to add — prices from menu, not AI.</p>
       <div className="mt-3 space-y-2" role="list" aria-label="Suggested items">

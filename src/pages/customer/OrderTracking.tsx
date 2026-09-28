@@ -110,7 +110,7 @@ export default function OrderTracking() {
   const currentIdx = STEPS.indexOf(order.status);
 
   return (
-    <div className="min-h-screen bg-surface-50 pb-10">
+    <main aria-label="Order tracking" className="min-h-screen bg-surface-50 pb-10">
       <div className="max-w-lg mx-auto px-4 py-5 sm:py-6">
         <div className="text-center mb-6">
           <Link to="/" className="text-[13px] font-semibold text-brand-700 hover:underline underline-offset-2">
@@ -241,7 +241,7 @@ export default function OrderTracking() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 

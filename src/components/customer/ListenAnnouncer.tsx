@@ -24,6 +24,7 @@ export function ListenAnnouncer({
   tableNumber,
   itemCount,
   categoryCount,
+  categoryNames,
   cartCount,
   cartTotal,
 }: {
@@ -31,6 +32,7 @@ export function ListenAnnouncer({
   tableNumber?: number | string | null;
   itemCount: number;
   categoryCount: number;
+  categoryNames?: string[];
   cartCount: number;
   cartTotal: number;
 }) {
@@ -39,22 +41,29 @@ export function ListenAnnouncer({
   const [paused, setPaused] = useState(false);
   const [failed, setFailed] = useState(false);
   const enabledRef = useRef(false);
+  const statusRef = useRef<HTMLDivElement>(null);
 
   const summary = useMemo(() => {
+    const cats = (categoryNames || []).filter(Boolean);
+    const catPart =
+      cats.length > 0
+        ? `Categories include ${cats.slice(0, 6).join(", ")}${cats.length > 6 ? `, and ${cats.length - 6} more` : ""}.`
+        : "";
     const parts = [
       `Welcome to ${restaurantName || "Smart Dine"}.`,
       tableNumber != null && tableNumber !== ""
         ? `You are at table ${tableNumber}.`
         : "",
       itemCount > 0
-        ? `The menu has ${itemCount} items across ${categoryCount} categories. Browse, search, or tap any dish to add it.`
+        ? `The menu has ${itemCount} items across ${categoryCount} categories. ${catPart} Browse, search, or tap any dish to add it. Each dish announces its name, price, and availability.`
         : "The menu is loading.",
+      "For service, use Call Waiter, Request Water, Request Bill, or Need Assistance.",
       cartCount > 0
         ? `Your cart has ${cartCount} item${cartCount === 1 ? "" : "s"}, total ${Math.round(cartTotal)} rupees.`
         : "Your cart is empty.",
     ];
     return parts.filter(Boolean).join(" ");
-  }, [restaurantName, tableNumber, itemCount, categoryCount, cartCount, cartTotal]);
+  }, [restaurantName, tableNumber, itemCount, categoryCount, categoryNames, cartCount, cartTotal]);
 
   const cartSummary = useMemo(
     () =>
@@ -77,13 +86,16 @@ export function ListenAnnouncer({
     setFailed(!ok);
   }
 
-  // Auto-introduce once per Listen activation (not on every cart keystroke).
+  // Auto-introduce once per Listen activation (not on every cart keystroke)
+  // and move screen-reader focus to this status so the user knows where
+  // automatic reading is controlled from.
   useEffect(() => {
     if (!prefs.listen) {
       enabledRef.current = false;
       stopReadAloud();
       return;
     }
+    statusRef.current?.focus({ preventScroll: true });
     if (enabledRef.current || !supported || itemCount === 0) return;
     enabledRef.current = true;
     setFailed(false);
@@ -119,12 +131,15 @@ export function ListenAnnouncer({
   return (
     <div className="max-w-lg mx-auto px-4 pt-3">
       <div
+        ref={statusRef}
+        tabIndex={-1}
         role="status"
         aria-live="polite"
-        className="bg-ink-900 text-white rounded-2xl shadow-card px-4 py-3 flex items-center gap-2 flex-wrap"
+        aria-label="Listen mode status and controls"
+        className="bg-ink-900 text-white rounded-2xl shadow-card px-4 py-3 flex items-center gap-2 flex-wrap focus-visible:outline-none"
       >
         <Volume2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-        <span className="text-[13px] font-semibold mr-auto">Listen mode on</span>
+        <span className="text-[13px] font-semibold mr-auto">Listen mode on — automatic reading started</span>
         {failed && (
           <span className="text-xs text-white/80 w-full">
             Couldn&apos;t start speech — use the Read buttons on each item.

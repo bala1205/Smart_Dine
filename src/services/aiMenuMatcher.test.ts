@@ -488,6 +488,19 @@ describe("fallbackParseVoiceClient — notes + misspellings", () => {
     expect(res.notes).toBe("");
   });
 
+  it("plate words are quantities, not notes — 'rendu plate biryani'", () => {
+    const menu = makeMenu([{ id: "m1", name: "Chicken Biryani", price: 250 }]);
+    const res = fallbackParseVoiceClient("rendu plate chicken biryani", menu);
+    expect(res.items.find((x) => x.name === "Chicken Biryani")?.quantity).toBe(2);
+    expect(res.notes).not.toContain("plate");
+  });
+
+  it("tamil plate — 'இரண்டு பிளேட்' keeps quantity, drops unit word", () => {
+    const menu = makeMenu([{ id: "m1", name: "Chicken Biryani", price: 250 }]);
+    const res = fallbackParseVoiceClient("இரண்டு பிளேட் சிக்கன் பிரியாணி", menu);
+    expect(res.items.find((x) => x.name === "Chicken Biryani")?.quantity).toBe(2);
+  });
+
   it("subset title — '2 chicken biriyani' hits 'Hyderabadi Chicken Dum Biriyani' x2", () => {
     const menu = makeMenu([{ id: "h1", name: "Hyderabadi Chicken Dum Biriyani", price: 280 }]);
     const res = fallbackParseVoiceClient("2 chicken biriyani medium spicy no onion", menu);

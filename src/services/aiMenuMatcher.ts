@@ -277,6 +277,12 @@ const TAMIL_STOP_WORDS = new Set([
   "enakku", "enaku", "enak", "enukku", "please", "kodunga",
 ]);
 
+// Unit words ("two plates", "rendu plate", "இரண்டு பிளேட்") — quantities are
+// parsed separately, so these are neither dishes nor kitchen notes.
+const PLATE_WORDS = new Set([
+  "plate", "plates", "thattu", "thattugal", "தட்டு", "தட்டுகள்", "பிளேட்",
+]);
+
 function transliterateTamilFoodWords(s: string): string {
   let out = s;
   for (const [tamil, eng] of Object.entries(TAMIL_DISH_ALIASES)) {
@@ -346,12 +352,19 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
   // Token positions consumed by dish/quantity matches — leftovers become
   // customization notes (e.g. "medium spicy, no onion"), never silently lost.
   const consumedIdx = new Set<number>();
+  const isPlateWord = (raw: string): boolean => {
+    const n = raw.toLowerCase().replace(/[^a-z0-9\u0b80-\u0bff]/g, "");
+    const sing = n.endsWith("s") && n.length > 3 ? n.slice(0, -1) : n;
+    return PLATE_WORDS.has(n) || PLATE_WORDS.has(sing);
+  };
   let i = 0;
   while (i < tokens.length) {
     let qty = toNum(rawTokens[i] || tokens[i]);
     let consumed = 0;
     if (qty != null) {
       consumed = 1;
+      // Skip unit words between quantity and dish ("rendu plate chicken").
+      while (consumed < 3 && isPlateWord(rawTokens[i + consumed] || "")) consumed++;
     } else {
       qty = 1;
     }
@@ -501,6 +514,7 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
       if (consumedIdx.has(idx)) return false;
       if (!t || t.length < 2) return false;
       if (TAMIL_STOP_WORDS.has(t)) return false;
+      if (PLATE_WORDS.has(t)) return false;
       if (toNum(t) != null) return false;
       return true;
     })

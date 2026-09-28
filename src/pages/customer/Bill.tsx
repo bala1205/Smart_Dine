@@ -246,7 +246,7 @@ export default function DigitalBill() {
   }
 
   return (
-    <div className="min-h-screen bg-surface-50 pb-10">
+    <main aria-label="Digital bill" className="min-h-screen bg-surface-50 pb-10">
       <div className="max-w-lg mx-auto px-4 py-5 sm:py-6">
         <button onClick={() => navigate(-1)} aria-label="Go back" className="pressable flex items-center gap-1.5 text-[13px] font-semibold text-ink-500 hover:text-ink-900 mb-4 px-1 py-1.5">
           <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back
@@ -339,6 +339,6 @@ export default function DigitalBill() {
           <button onClick={() => navigate(`/order/${currentOrder.id}?token=${currentOrder.trackingToken}`)} className="text-[13px] font-semibold text-brand-700 hover:underline underline-offset-2 px-2 py-1.5">View order tracking</button>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

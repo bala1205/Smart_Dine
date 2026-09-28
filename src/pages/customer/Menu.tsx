@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Search, Plus, Minus, ShoppingBag, X, UtensilsCrossed, TriangleAlert, PauseCircle, QrCode, SearchX, Lock } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
@@ -8,6 +8,7 @@ import { useMenu } from "../../hooks/useMenu";
 import { getTable } from "../../services/tableService";
 import { useCart } from "../../context/CartContext";
 import { formatCurrency } from "../../utils/formatting";
+import { formatAddToCartLabel, formatSearchAnnouncement } from "../../utils/announcements";
 import { getOrCreateSessionId, setRestaurantContext } from "../../utils/session";
 import type { Table } from "../../types/table";
 import { PageLoader } from "../../components/common/Spinner";
@@ -66,10 +67,19 @@ export default function CustomerMenu() {
 
   const { add, count, total, setOpen, lines, setQuantity } = useCart();
   const { prefs, setPrefs } = useAdaptivePrefs();
+  // Polite, debounced search-result announcement for screen readers.
+  const [searchStatus, setSearchStatus] = useState("");
 
   function scrollToId(id: string) {
     if (typeof document === "undefined") return;
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function focusSearchInput() {
+    if (typeof document === "undefined") return;
+    window.setTimeout(() => {
+      document.getElementById("sd-search-input")?.focus({ preventScroll: true });
+    }, 450);
   }
 
   function handleSpeak() {
@@ -102,6 +112,14 @@ export default function CustomerMenu() {
     }
     return list;
   }, [items, categories, activeCat, query]);
+
+  // Announce settled search results once (debounced) — never per keystroke.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setSearchStatus(formatSearchAnnouncement(activeItems.length, query));
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [activeItems.length, query]);
 
   if (invalid === "loading") {
     return (
@@ -191,8 +209,8 @@ export default function CustomerMenu() {
   const visibleCategories = categories.filter((c) => c.isActive);
 
   return (
-    <div className="min-h-screen bg-surface-50 pb-28">
-      <div className="bg-ink-900 text-white">
+    <main aria-label={`${restaurant?.name || "Restaurant"} menu`} className="min-h-screen bg-surface-50 pb-28">
+      <header className="bg-ink-900 text-white">
         <div className="max-w-lg mx-auto px-4 py-6">
           <div className="flex items-center gap-3.5">
             {restaurant.logoUrl ? (
@@ -218,13 +236,14 @@ export default function CustomerMenu() {
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
       <AdaptivePrefsStrip
         onSpeak={handleSpeak}
         onBrowse={() => {
           setPrefs({ voiceHints: false });
           scrollToId("sd-search");
+          focusSearchInput();
         }}
       />
 
@@ -233,21 +252,27 @@ export default function CustomerMenu() {
         tableNumber={table?.tableNumber ?? null}
         itemCount={items.length}
         categoryCount={visibleCategories.length}
+        categoryNames={visibleCategories.map((c) => c.name)}
         cartCount={count}
         cartTotal={total}
       />
 
-      <div id="sd-search" className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-surface-50/95 backdrop-blur supports-[backdrop-filter]:bg-surface-50/85 py-3 scroll-mt-2">
+      <div id="sd-search" role="search" aria-label="Search the menu" className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-surface-50/95 backdrop-blur supports-[backdrop-filter]:bg-surface-50/85 py-3 scroll-mt-2">
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400 pointer-events-none" aria-hidden="true" />
           <input
+            id="sd-search-input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search dishes, categories..."
             aria-label="Search menu"
+            aria-describedby="sd-search-status"
             type="search"
             className="w-full pl-10 pr-10 py-3 min-h-[46px] rounded-2xl border border-surface-200 bg-white text-sm text-ink-900 placeholder:text-ink-400 shadow-card focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
           />
+          <div id="sd-search-status" role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+            {searchStatus}
+          </div>
           {query && (
             <button
               onClick={() => setQuery("")}
@@ -261,51 +286,56 @@ export default function CustomerMenu() {
       </div>
 
       <div className="max-w-lg mx-auto px-4">
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 scrollbar-none" role="group" aria-label="Filter by category">
+        <nav aria-label="Menu categories" className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 scrollbar-none">
           <button
             onClick={() => setActiveCat("all")}
             aria-pressed={activeCat === "all"}
+            aria-label={`All menu items, ${items.length} items`}
             className={`pressable whitespace-nowrap px-4 py-2 min-h-[36px] rounded-full text-[13px] font-semibold border ${
               activeCat === "all" ? "bg-ink-900 text-white border-ink-900 shadow-sm" : "bg-white text-ink-600 border-surface-200 hover:border-surface-300"
             }`}
           >
             All
           </button>
-          {visibleCategories.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setActiveCat(c.id)}
-              aria-pressed={activeCat === c.id}
-              className={`pressable whitespace-nowrap px-4 py-2 min-h-[36px] rounded-full text-[13px] font-semibold border ${
-                activeCat === c.id ? "bg-ink-900 text-white border-ink-900 shadow-sm" : "bg-white text-ink-600 border-surface-200 hover:border-surface-300"
-              }`}
-            >
-              {c.name}
-            </button>
-          ))}
-        </div>
+          {visibleCategories.map((c) => {
+            const catCount = items.filter((i) => i.categoryId === c.id).length;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setActiveCat(c.id)}
+                aria-pressed={activeCat === c.id}
+                aria-label={`${c.name}, ${catCount} item${catCount === 1 ? "" : "s"}`}
+                className={`pressable whitespace-nowrap px-4 py-2 min-h-[36px] rounded-full text-[13px] font-semibold border ${
+                  activeCat === c.id ? "bg-ink-900 text-white border-ink-900 shadow-sm" : "bg-white text-ink-600 border-surface-200 hover:border-surface-300"
+                }`}
+              >
+                {c.name}
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       {table && (
-        <div className="max-w-lg mx-auto px-4 py-2">
+        <section aria-label="Service requests" className="max-w-lg mx-auto px-4 py-2">
           <ServiceRequestPanel
             restaurantId={restaurantId}
             tableId={tableId}
             tableNumber={table.tableNumber}
           />
-        </div>
+        </section>
       )}
 
       {/* AI-assisted ordering — voice + natural language, mobile-first, accessible */}
-      <div id="sd-voice" className="max-w-lg mx-auto px-4 py-3 space-y-4 scroll-mt-2">
+      <section aria-label="Voice and text ordering" id="sd-voice" className="max-w-lg mx-auto px-4 py-3 space-y-4 scroll-mt-2">
         <div className="sr-only" aria-live="polite">
           SmartDine AI ordering available: voice and text
         </div>
         <VoiceOrder restaurantId={restaurantId} menu={items} />
         <NaturalLanguageOrder restaurantId={restaurantId} menu={items} />
-      </div>
+      </section>
 
-      <div className="max-w-lg mx-auto px-4 py-4 space-y-3">
+      <section aria-label={activeCat === "all" ? `All menu items, ${activeItems.length} shown` : `Menu items, ${activeItems.length} shown`} className="max-w-lg mx-auto px-4 py-4 space-y-3">
         {activeItems.length === 0 && (
           <div className="bg-white rounded-2xl border border-surface-200 shadow-card">
             <EmptyState
@@ -383,7 +413,7 @@ export default function CustomerMenu() {
                         <button
                           onClick={() => add(item)}
                           className="pressable flex items-center gap-1 bg-ink-900 hover:bg-ink-700 text-white pl-3 pr-3.5 py-2 min-h-[36px] rounded-xl text-[13px] font-semibold"
-                          aria-label={`Add ${item.name} to cart`}
+                          aria-label={formatAddToCartLabel(item)}
                         >
                           <Plus className="w-4 h-4" aria-hidden="true" />
                           Add
@@ -400,7 +430,7 @@ export default function CustomerMenu() {
             </article>
           );
         })}
-      </div>
+      </section>
 
       {count > 0 && (
         <div className="fixed bottom-0 inset-x-0 z-30 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -420,7 +450,7 @@ export default function CustomerMenu() {
       )}
 
       <CartDrawer menuItems={items} />
-    </div>
+    </main>
   );
 }
 
@@ -511,6 +541,16 @@ function CartDrawer({ menuItems }: { menuItems: import("../../types/menu").MenuI
   const { prefs } = useAdaptivePrefs();
   const navigate = useNavigate();
   const [showInstructions, setShowInstructions] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const wasOpenRef = useRef(false);
+
+  // Screen-reader focus management: land on the cart heading when opened.
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      headingRef.current?.focus({ preventScroll: true });
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]);
 
   // Realtime availability sync: the menu snapshot updates live via useMenu,
   // so flag cart lines whose item was disabled or sold out after being added.
@@ -547,7 +587,7 @@ function CartDrawer({ menuItems }: { menuItems: import("../../types/menu").MenuI
         }`}
       >
         <div className="px-5 py-4 border-b border-surface-100 flex items-center justify-between gap-3">
-          <h2 className="text-[17px] font-bold tracking-tight text-ink-900">
+          <h2 ref={headingRef} tabIndex={-1} className="text-[17px] font-bold tracking-tight text-ink-900 focus-visible:outline-none">
             Your cart {count > 0 && <span className="text-sm font-semibold text-ink-400">• {count} item{count > 1 ? "s" : ""}</span>}
           </h2>
           <button

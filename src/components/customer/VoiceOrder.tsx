@@ -8,6 +8,14 @@ import type { VoiceState, OrderIntent } from "../../types/aiOrder";
 import { OrderIntentPreview } from "./OrderIntentPreview";
 import { AccessibleStatus } from "./AccessibleStatus";
 import { VOICE_LOCALE, useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
+import {
+  formatAddedAnnouncement,
+  formatAmbiguousAnnouncement,
+  formatConfirmationAnnouncement,
+  formatNoMatchAnnouncement,
+  formatUnavailableAnnouncement,
+  formatVoiceMatchAnnouncement,
+} from "../../utils/announcements";
 
 const STATE_LABEL: Record<VoiceState, string> = {
   IDLE: "Ready — tap to speak",
@@ -34,8 +42,10 @@ export function VoiceOrder({
   restaurantId: string;
   menu: MenuItem[];
 }) {
-  const { add, setInstruction } = useCart();
+  const { add, setInstruction, total: cartTotal } = useCart();
   const { prefs } = useAdaptivePrefs();
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const addedRef = useRef<HTMLParagraphElement>(null);
   const [state, setState] = useState<VoiceState>("IDLE");
   const [transcript, setTranscript] = useState("");
   const [intent, setIntent] = useState<OrderIntent | null>(null);
@@ -232,9 +242,25 @@ export function VoiceOrder({
     return () => window.removeEventListener("sd:start-voice", handler);
   }, []);
 
+  // Screen-reader focus: land on the error or the cart-success message so
+  // the user never wonders where they are. Confirmation focus is handled by
+  // the OrderIntentPreview dialog auto-focusing itself on appear.
+  useEffect(() => {
+    if (state === "ERROR" && error) {
+      errorRef.current?.focus({ preventScroll: true });
+    }
+  }, [state, error]);
+  useEffect(() => {
+    if (confirmMessage && state === "IDLE") {
+      addedRef.current?.focus({ preventScroll: true });
+    }
+  }, [confirmMessage, state]);
+
   const handleAdd = () => {
     if (!intent) return;
     const addedIds: string[] = [];
+    const added: Array<{ name: string; quantity: number }> = [];
+    let addedTotal = 0;
     for (const it of intent.items) {
       const menuItem = menu.find((m) => m.id === it.menuItemId);
       if (!menuItem) continue;
@@ -242,6 +268,8 @@ export function VoiceOrder({
       // Use existing cart logic — add with quantity
       add(menuItem, it.quantity);
       addedIds.push(menuItem.id);
+      added.push({ name: menuItem.name, quantity: it.quantity });
+      addedTotal += (Number.isFinite(menuItem.price) ? menuItem.price : 0) * it.quantity;
     }
     if (addedIds.length > 0) {
       // Carry AI-detected notes (e.g. "no onion") into the cart's existing
@@ -250,13 +278,11 @@ export function VoiceOrder({
       if (notes && addedIds.length === 1) {
         setInstruction(addedIds[0], notes.slice(0, 200));
       }
-      // Announce for screen reader
+      // Announce for screen reader only AFTER CartContext confirms the add.
       setState("IDLE");
       setIntent(null);
       setTranscript("");
-      setConfirmMessage(
-        addedIds.length === 1 ? "Added to cart" : `${addedIds.length} items added to cart`
-      );
+      setConfirmMessage(formatAddedAnnouncement(added, cartTotal + addedTotal));
     }
   };
 
@@ -266,7 +292,7 @@ export function VoiceOrder({
     const menuItem = menu.find((m) => m.id === menuItemId);
     if (!menuItem) return;
     if (!menuItem.isAvailable) {
-      setHeardHint(`${name} is currently unavailable. Please pick another option.`);
+      setHeardHint(formatUnavailableAnnouncement(name));
       return;
     }
     add(menuItem, 1);
@@ -334,6 +360,20 @@ export function VoiceOrder({
 
       <AccessibleStatus message={STATE_LIVE[state]} />
       {error && <AccessibleStatus message={error} level="assertive" />}
+      {showPreview && intent && (
+        <AccessibleStatus
+          message={
+            intent.items.length > 0
+              ? `${formatVoiceMatchAnnouncement(intent, menu)} ${formatConfirmationAnnouncement(intent, menu)}`
+              : intent.ambiguous && intent.ambiguous.length > 0
+                ? formatAmbiguousAnnouncement(
+                    intent.ambiguous[0].query,
+                    intent.ambiguous[0].options
+                  )
+                : formatNoMatchAnnouncement()
+          }
+        />
+      )}
 
       <div className="mt-4 flex flex-col items-center gap-3" role="group" aria-label="Voice controls">
         {!isListening ? (
@@ -372,7 +412,12 @@ export function VoiceOrder({
             </p>
           )}
           {state === "ERROR" && error && (
-            <p className="text-sm text-danger-600" role="alert">
+            <p
+              ref={errorRef}
+              tabIndex={-1}
+              className="text-sm text-danger-600 focus-visible:outline-none"
+              role="alert"
+            >
               {error}
             </p>
           )}
@@ -394,7 +439,12 @@ export function VoiceOrder({
       </div>
 
       {confirmMessage && state === "IDLE" && (
-        <p className="mt-3 text-sm font-medium text-green-700" role="status">
+        <p
+          ref={addedRef}
+          tabIndex={-1}
+          className="mt-3 text-sm font-medium text-green-700 focus-visible:outline-none"
+          role="status"
+        >
           {confirmMessage}
         </p>
       )}
@@ -436,10 +486,6 @@ export function VoiceOrder({
         </div>
       )}
 
-      {/* Hidden live region for cart add confirmation */}
-      <div aria-live="polite" className="sr-only">
-        {intent && state === "IDLE" && transcript ? "Order added to cart" : ""}
-      </div>
     </section>
   );
 }
