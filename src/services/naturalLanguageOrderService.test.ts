@@ -67,6 +67,9 @@ describe("answerMenuQuestion — same menu, same matcher", () => {
     expect(names).toContain("Mutton Biriyani");
     expect(names).toContain("Egg Biriyani");
     expect(r!.answer).toContain("3");
+    // The answer names every candidate, not just the shown five.
+    expect(r!.answer).toContain("Mutton Biriyani");
+    expect(r!.answer).toContain("340");
   });
 
   it("drinks listing resolves across real drink categories", () => {

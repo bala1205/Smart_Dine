@@ -164,11 +164,17 @@ export function answerMenuQuestion(
     cands = [...cands].sort((a, b) => Number(b.isAvailable === true) - Number(a.isAvailable === true) || priceOf(a) - priceOf(b));
     const shown = cands.slice(0, 5);
     const label = scope || "menu";
+    // The answer names EVERY candidate (not just the 5 shown for ordering)
+    // so listings like "what biriyani do you have?" are complete.
+    const fullList = cands
+      .map((m) => `${m.name} at ${formatCurrency(priceOf(m))}`)
+      .join(", ")
+      .slice(0, 500);
     return {
       matches: shown.map((m) => ({ name: m.name, quantity: 1 })),
       noMatch: false,
       query,
-      answer: `Found ${cands.length} ${label} item${cands.length === 1 ? "" : "s"}: ${shown.map((m) => `${m.name} at ${formatCurrency(priceOf(m))}`).join(", ")}${cands.length > shown.length ? `, and ${cands.length - shown.length} more` : ""}.`,
+      answer: `Found ${cands.length} ${label} item${cands.length === 1 ? "" : "s"}: ${fullList}.`,
     };
   }
 
