@@ -1,7 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Sparkles, Loader2, Search, X } from "lucide-react";
 import { parseNaturalLanguage } from "../../services/naturalLanguageOrderService";
 import type { MenuItem } from "../../types/menu";
+import type { MenuCategory } from "../../types/menu";
 import type { NaturalLanguageIntent } from "../../types/aiOrder";
 import { NaturalIntentPreview } from "./OrderIntentPreview";
 import { AccessibleStatus } from "./AccessibleStatus";
@@ -10,10 +11,19 @@ import { useCart } from "../../context/CartContext";
 export function NaturalLanguageOrder({
   restaurantId,
   menu,
+  categories,
 }: {
   restaurantId: string;
   menu: MenuItem[];
+  /** Real category names — lets menu questions resolve against categories. */
+  categories?: MenuCategory[];
 }) {
+  // Category id → name for deterministic menu Q&A (same loaded data).
+  const catById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of categories || []) map.set(c.id, c.name);
+    return map;
+  }, [categories]);
   const { add, setInstruction } = useCart();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,9 +51,13 @@ export function NaturalLanguageOrder({
     setLiveMessage("Finding suggestions...");
 
     try {
-      const res = await parseNaturalLanguage(restaurantId, q, menu);
+      const res = await parseNaturalLanguage(restaurantId, q, menu, catById);
       setIntent(res);
-      if (res.noMatch) {
+      if (res.answer && res.matches.length === 0) {
+        setLiveMessage(res.answer);
+      } else if (res.answer) {
+        setLiveMessage(`${res.answer} ${res.matches.length} shown below.`);
+      } else if (res.noMatch) {
         setLiveMessage("No matching items found");
       } else {
         setLiveMessage(`Found ${res.matches.length} suggestions`);
@@ -204,9 +218,15 @@ export function NaturalLanguageOrder({
                     setIntent(null);
                     setLiveMessage("Finding suggestions...");
                     try {
-                      const res = await parseNaturalLanguage(restaurantId, chip, menu);
+                      const res = await parseNaturalLanguage(restaurantId, chip, menu, catById);
                       setIntent(res);
-                      setLiveMessage(res.noMatch ? "No matching items" : `Found ${res.matches.length} suggestions`);
+                      setLiveMessage(
+                        res.answer && res.matches.length === 0
+                          ? res.answer
+                          : res.noMatch
+                            ? "No matching items"
+                            : `Found ${res.matches.length} suggestions`
+                      );
                     } catch (err: unknown) {
                       setError((err as Error).message || "Smart recommendations are temporarily unavailable.");
                     } finally {

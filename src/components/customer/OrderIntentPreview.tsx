@@ -179,11 +179,15 @@ export function NaturalIntentPreview({
   onRemove?: (id: string) => void;
 }) {
   const resultRef = useFocusOnShow<HTMLDivElement>();
-  if (intent.noMatch) {
+  if (intent.noMatch || intent.matches.length === 0) {
     return (
       <div ref={resultRef} tabIndex={-1} className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4 focus-visible:outline-none" role="alert">
-        <h3 className="font-bold text-ink-900">No match</h3>
-        <p className="text-sm text-ink-500 mt-1">{intent.reason || "No matching item is currently available."}</p>
+        <h3 className="font-bold text-ink-900">{intent.answer ? "Answer" : "No match"}</h3>
+        {intent.answer ? (
+          <p className="text-sm text-ink-700 mt-1">{intent.answer}</p>
+        ) : (
+          <p className="text-sm text-ink-500 mt-1">{intent.reason || "No matching item is currently available."}</p>
+        )}
         <button
           onClick={onCancel}
           className="mt-3 px-4 py-2 rounded-xl bg-white border border-surface-200 text-ink-700 font-medium"
@@ -203,7 +207,11 @@ export function NaturalIntentPreview({
   return (
     <div ref={resultRef} tabIndex={-1} className="bg-white rounded-2xl border border-surface-200 shadow-medium p-5 mt-4 focus-visible:outline-none" role="dialog" aria-modal="true" aria-labelledby="nl-title">
       <h3 id="nl-title" className="font-bold text-ink-900">Suggestions for you</h3>
-      <p className="text-xs text-ink-500 mt-1">Tap to add — prices from menu, not AI.</p>
+      {intent.answer ? (
+        <p className="text-sm text-ink-700 mt-1">{intent.answer}</p>
+      ) : (
+        <p className="text-xs text-ink-500 mt-1">Tap to add — prices from menu, not AI.</p>
+      )}
       <div className="mt-3 space-y-2" role="list" aria-label="Suggested items">
         {intent.matches.map((m) => {
           const menuItem = menu.find((x) => x.id === m.menuItemId);

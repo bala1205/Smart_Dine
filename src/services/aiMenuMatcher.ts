@@ -205,7 +205,7 @@ export function resolveNaturalIntent(
   menu: MenuItem[]
 ): NaturalLanguageIntent {
   if (result.noMatch) {
-    return { matches: [], noMatch: true, reason: result.reason || "No matching item is currently available.", query: result.query, notes: "" };
+    return { matches: [], noMatch: true, reason: result.reason || "No matching item is currently available.", query: result.query, notes: "", answer: result.answer || "" };
   }
 
   const matches: NaturalLanguageIntent["matches"] = [];
@@ -228,10 +228,10 @@ export function resolveNaturalIntent(
   }
 
   if (matches.length === 0) {
-    return { matches: [], noMatch: true, reason: "No matching item is currently available.", query: result.query, notes: "" };
+    return { matches: [], noMatch: true, reason: "No matching item is currently available.", query: result.query, notes: "", answer: result.answer || "" };
   }
 
-  return { matches, noMatch: false, reason: result.reason, query: result.query, notes: result.notes?.slice(0, 200) || "" };
+  return { matches, noMatch: false, reason: result.reason, query: result.query, notes: result.notes?.slice(0, 200) || "", answer: result.answer?.slice(0, 500) || "" };
 }
 
 function isOutOfStock(m: MenuItem): boolean {
@@ -397,6 +397,9 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
     i += 1;
     if (result.length > 20) break;
   }
+  // Ambiguous candidates collected by the subset pass (shared-top ties) and
+  // the partial-word pass below. Never auto-added — the UI asks instead.
+  const ambiguous: VoiceOrderResult["ambiguous"] = [];
   // Second pass: for any menu items whose name appears in transcript but were missed due to plural or "and" gaps,
   // add them if not already captured. Try to infer quantity from preceding number in transcript.
   for (const mn of menuNorm) {
@@ -416,8 +419,10 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
   }
   // Subset pass: the transcript names a real dish without its full menu title
   // ("chicken biriyani" → "Hyderabadi Chicken Dum Biriyani"). Emits only a
-  // UNIQUE best-scoring real item; ties fall through to suggestions / the
-  // "Did you mean …?" pass so nothing uncertain is ever auto-added.
+  // UNIQUE best-scoring real item. When several real items share the top
+  // score ("tandoori chicken" → Full + Half, "biriyani" → every biriyani),
+  // an ambiguous "Did you mean …?" entry is produced instead — never an
+  // automatic guess, never an auto-add.
   if (result.length === 0) {
     const scored: Array<{ mn: (typeof menuNorm)[0]; score: number; firstIdx: number; tokIdx: number[] }> = [];
     for (const mn of menuNorm) {
@@ -437,14 +442,17 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
           score++;
         }
       }
-      const need = Math.min(2, nameToks.length);
-      if (score >= need && score > 0) {
+      if (score > 0) {
         scored.push({ mn, score, firstIdx: Math.min(...tokIdx), tokIdx });
       }
     }
     scored.sort((a, b) => b.score - a.score || a.mn.norm.length - b.mn.norm.length);
-    if (scored.length > 0 && (scored.length === 1 || scored[0].score > scored[1].score)) {
-      const win = scored[0];
+    const best = scored.length > 0 ? scored[0].score : 0;
+    const top = scored.filter((s) => s.score === best);
+    const need = (mn: (typeof menuNorm)[0]) =>
+      Math.min(2, mn.normSingular.split(/\s+/).filter(Boolean).length);
+    if (best > 0 && top.length === 1 && top[0].score >= need(top[0].mn)) {
+      const win = top[0];
       let q = 1;
       if (win.firstIdx > 0) {
         const pq = toNum(rawTokens[win.firstIdx - 1] || tokens[win.firstIdx - 1]);
@@ -456,6 +464,11 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
       for (const k of win.tokIdx) consumedIdx.add(k);
       result.push({ name: win.mn.item.name, quantity: q });
       used.add(win.mn.item.id);
+    } else if (best > 0 && top.length > 1) {
+      ambiguous.push({
+        query: "",
+        options: top.slice(0, 5).map((s) => s.mn.item.name),
+      });
     }
   }
   const dedup = new Map<string, number>();
@@ -467,7 +480,6 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
   // of a menu-name token (never an equal word) suggests the dish. Exactly one
   // candidate dish -> add it; several -> ambiguous "Did you mean …?" entry.
   // Never silently adds when unclear; never touches already-matched items.
-  const ambiguous: VoiceOrderResult["ambiguous"] = [];
   if (items.length === 0) {
     const allNameTokens = new Set<string>();
     for (const mn of menuNorm) {

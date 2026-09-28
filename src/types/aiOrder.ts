@@ -20,6 +20,8 @@ export type NaturalLanguageIntent = {
   query?: string;
   /** Customization leftovers (e.g. "no onion") → cart instruction. */
   notes?: string;
+  /** Deterministic menu answer (price/availability/listing), from real menu. */
+  answer?: string;
 };
 
 export type VoiceState =
@@ -44,4 +46,6 @@ export type NaturalLanguageResult = {
   query: string;
   /** Customization leftovers (e.g. "no onion") → cart instruction. */
   notes?: string;
+  /** Deterministic menu answer (price/availability/listing), from real menu. */
+  answer?: string;
 };

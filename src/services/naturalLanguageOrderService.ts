@@ -3,7 +3,8 @@ import { app } from "../lib/firebase";
 import type { MenuItem } from "../types/menu";
 import type { NaturalLanguageResult, NaturalLanguageIntent } from "../types/aiOrder";
 import { resolveNaturalIntent } from "./aiMenuMatcher";
-import { fallbackParseVoiceClient } from "./aiMenuMatcher";
+import { fallbackParseVoiceClient, findMenuMatch, normalizeMenuName } from "./aiMenuMatcher";
+import { formatCurrency } from "../utils/formatting";
 
 const MAX_QUERY = 500;
 
@@ -28,8 +29,161 @@ function transliterateTamilForNatural(s: string): string {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic menu Q&A — answers questions from the SAME loaded menu using
+// the SAME normalization/matcher as ordering. Never invents: every name,
+// price, and availability comes from a real menu document. Returns null when
+// the input looks like an order (or nothing answerable), letting the normal
+// order-intent path handle it.
+// ---------------------------------------------------------------------------
+
+const LISTING_TRIGGERS = ["what", "which", "list", "show", "options", "menu", "have", "enna"];
+const ORDER_TRIGGERS = ["give", "kudu", "order", "venum", "vendum", "pannu", "pannunga", "add", "want", "get", "bring"];
+const QUESTION_FILLER = new Set([
+  "what", "which", "list", "show", "me", "the", "a", "an", "do", "does", "you", "your",
+  "have", "has", "got", "is", "are", "there", "here", "any", "many", "much", "price",
+  "cost", "rate", "how", "of", "for", "in", "on", "my", "enna", "irukku", "please",
+  "available", "availability", "stock", "cheapest", "cheap", "options", "option", "menu",
+  "items", "item", "dishes", "dish", "food", "things",
+]);
+
+function questionRemainder(query: string): string {
+  return normalizeMenuName(query)
+    .split(" ")
+    .filter((t) => t.length > 1 && !QUESTION_FILLER.has(t))
+    .join(" ");
+}
+
+const DRINK_KEYS = ["juice", "coffee", "tea", "drink", "shake", "mojito", "soda", "cola", "mocktail", "milkshake", "chai", "lassi"];
+const DESSERT_KEYS = ["dessert", "cake", "ice cream", "icecream", "pastry", "brownie"];
+
+/** Generic scopes resolve against real category/item words — never invented. */
+function scopeHit(scope: string, hay: string): boolean {
+  const s = scope.trim();
+  if (s.length < 3) return false;
+  const sing = s.endsWith("s") && s.length > 3 ? s.slice(0, -1) : s;
+  if (hay.includes(s) || hay.includes(sing)) return true;
+  // "drinks"/"desserts" style generics: match real category/item keywords.
+  if (sing === "drink" || sing === "beverage") {
+    return DRINK_KEYS.some((k) => hay.includes(k));
+  }
+  if (sing === "dessert" || sing === "sweet") {
+    return DESSERT_KEYS.some((k) => hay.includes(k));
+  }
+  return false;
+}
+
+function scopeFilter(
+  scope: string,
+  menu: MenuItem[],
+  catNameOf: (m: MenuItem) => string
+): MenuItem[] {
+  const s = scope.trim();
+  if (s.length < 3) return [];
+  return menu.filter((m) => {
+    const hay = `${normalizeMenuName(m.name)} ${normalizeMenuName(catNameOf(m))} ${normalizeMenuName(m.categoryId)}`;
+    return scopeHit(s, hay);
+  });
+}
+
+function priceOf(m: MenuItem): number {
+  return Number.isFinite(m.price) ? m.price : 0;
+}
+
+/**
+ * Tries to answer a menu question deterministically. Returns null when the
+ * input is an order (or unanswerable) so order parsing handles it.
+ */
+export function answerMenuQuestion(
+  query: string,
+  menu: MenuItem[],
+  catById?: Map<string, string>
+): NaturalLanguageResult | null {
+  if (menu.length === 0) return null;
+  const catNameOf = (m: MenuItem) => catById?.get(m.categoryId) || "";
+  const lower = ` ${normalizeMenuName(query)} `;
+  const hasWord = (...words: string[]) => words.some((w) => lower.includes(` ${w} `) || lower.includes(` ${w}s `));
+  const isOrder = hasWord(...ORDER_TRIGGERS);
+  const remainder = questionRemainder(query);
+
+  // Price question: "How much is Mutton Biriyani?"
+  if (!isOrder && (hasWord("how much", "price", "cost", "rate") || lower.includes(" how much "))) {
+    const hit = findMenuMatch(remainder, menu);
+    if (hit.kind === "match") {
+      const m = hit.item;
+      return {
+        matches: [],
+        noMatch: false,
+        query,
+        answer: `${m.name} costs ${formatCurrency(priceOf(m))}.`,
+      };
+    }
+    return null;
+  }
+
+  // Availability question: "Is Hyderabadi Chicken Dum Biriyani available?"
+  if (!isOrder && hasWord("available", "availability", "stock")) {
+    const hit = findMenuMatch(remainder, menu);
+    if (hit.kind === "match") {
+      const m = hit.item;
+      const ok = m.isAvailable === true;
+      return {
+        matches: [],
+        noMatch: false,
+        query,
+        answer: ok
+          ? `Yes, ${m.name} is available at ${formatCurrency(priceOf(m))}.`
+          : `No, ${m.name} is currently unavailable.`,
+      };
+    }
+    return null;
+  }
+
+  // Cheapest question: "What is the cheapest dosa?"
+  if (hasWord("cheapest", "cheap")) {
+    const cands = scopeFilter(remainder, menu, catNameOf).filter((m) => m.isAvailable === true);
+    if (cands.length > 0) {
+      cands.sort((a, b) => priceOf(a) - priceOf(b));
+      const win = cands[0];
+      return {
+        matches: [{ name: win.name, quantity: 1 }],
+        noMatch: false,
+        query,
+        answer: `The cheapest option is ${win.name} at ${formatCurrency(priceOf(win))}.`,
+      };
+    }
+    return null;
+  }
+
+  // Listing question: "What biriyani do you have?" / "Show me desserts"
+  // (only when it is NOT an order — "Rendu dosa" stays an order).
+  if (!isOrder && hasWord(...LISTING_TRIGGERS)) {
+    const scope = remainder;
+    let cands: MenuItem[] = scope ? scopeFilter(scope, menu, catNameOf) : [...menu];
+    if (cands.length === 0) return null;
+    cands = [...cands].sort((a, b) => Number(b.isAvailable === true) - Number(a.isAvailable === true) || priceOf(a) - priceOf(b));
+    const shown = cands.slice(0, 5);
+    const label = scope || "menu";
+    return {
+      matches: shown.map((m) => ({ name: m.name, quantity: 1 })),
+      noMatch: false,
+      query,
+      answer: `Found ${cands.length} ${label} item${cands.length === 1 ? "" : "s"}: ${shown.map((m) => `${m.name} at ${formatCurrency(priceOf(m))}`).join(", ")}${cands.length > shown.length ? `, and ${cands.length - shown.length} more` : ""}.`,
+    };
+  }
+
+  return null;
+}
+
 // Simple fallback for natural language when Gemini unavailable
-function fallbackNatural(query: string, menu: MenuItem[]): NaturalLanguageResult {
+function fallbackNatural(
+  query: string,
+  menu: MenuItem[],
+  catById?: Map<string, string>
+): NaturalLanguageResult {
+  // Menu questions first — same menu, same matcher, answer path.
+  const answered = answerMenuQuestion(query, menu, catById);
+  if (answered) return answered;
   const translit = transliterateTamilForNatural(query);
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0B80-\u0BFF\s]/g, " ").trim();
   const lower = normalize(translit).toLowerCase();
@@ -99,11 +253,21 @@ function fallbackNatural(query: string, menu: MenuItem[]): NaturalLanguageResult
 export async function parseNaturalLanguage(
   restaurantId: string,
   query: string,
-  menu: MenuItem[]
+  menu: MenuItem[],
+  catById?: Map<string, string>
 ): Promise<NaturalLanguageIntent> {
   const clean = query.trim().slice(0, MAX_QUERY);
   if (!clean || clean.length < 2) throw new Error("Please enter a valid request.");
   if (!restaurantId) throw new Error("Missing restaurant.");
+
+  // Menu questions are answered deterministically from the loaded menu even
+  // when the AI backend is reachable — same menu, same matcher, no guessing.
+  try {
+    const answered = answerMenuQuestion(clean, menu, catById);
+    if (answered) return resolveNaturalIntent(answered, menu);
+  } catch {
+    // fall through to AI / order parsing
+  }
 
   try {
     const functions = getFunctions(app);
@@ -124,10 +288,10 @@ export async function parseNaturalLanguage(
       // Deterministic fallback runs against the FULL loaded restaurant menu
       // (never a truncated subset) so dishes beyond the AI prompt cap still
       // resolve; prices/availability stay authoritative from the same menu.
-      return resolveNaturalIntent(fallbackNatural(clean, menu), menu);
+      return resolveNaturalIntent(fallbackNatural(clean, menu, catById), menu);
     }
     try {
-      const fb = fallbackNatural(clean, menu);
+      const fb = fallbackNatural(clean, menu, catById);
       const resolved = resolveNaturalIntent(fb, menu);
       if (!resolved.noMatch) return resolved;
     } catch {

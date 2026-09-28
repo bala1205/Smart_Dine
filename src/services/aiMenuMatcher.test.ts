@@ -517,6 +517,235 @@ describe("fallbackParseVoiceClient — notes + misspellings", () => {
   });
 });
 
+describe("full-menu matrix — every category resolves by spoken name", () => {
+  // Fixture mirrors the real Firestore records (name/price/category) so the
+  // matcher is exercised across the whole menu. Production code NEVER sees
+  // this table — it always uses useMenu(restaurantId).
+  const MATRIX: Array<[string, number, string]> = [
+    ["Al Fahm Chicken", 310, "Grills"],
+    ["Aloo Gobi", 170, "North Indian"],
+    ["Aloo Palak", 180, "Veg Curries"],
+    ["American Chopsuey", 220, "Chinese"],
+    ["Black Forest Pastry", 110, "Cakes"],
+    ["Blue Lagoon", 140, "Mocktails"],
+    ["Bread Omelette", 80, "Egg"],
+    ["Brownie with Ice Cream", 160, "Desserts"],
+    ["Burger & Fries Combo", 250, "Combo Meals"],
+    ["Butter Chicken", 290, "Non-Veg Curries"],
+    ["Butter Naan", 50, "Indian Breads"],
+    ["Cappuccino", 120, "Coffee"],
+    ["Ceylon Parotta", 130, "Parotta"],
+    ["Cheese Burst Dosa", 160, "Dosas"],
+    ["Chef's Special Platter", 590, "Special Items"],
+    ["Chettinad Chicken Curry", 270, "Non-Veg Curries"],
+    ["Chettinad Meal", 250, "South Indian"],
+    ["Chicken 65", 250, "Starters"],
+    ["Chicken Caesar Salad", 220, "Salads"],
+    ["Chicken Club Sandwich", 190, "Sandwiches"],
+    ["Chicken Fried Rice", 220, "Fried Rice"],
+    ["Chicken Grilled BBQ", 290, "Grills"],
+    ["Chicken Hakka Noodles", 220, "Noodles"],
+    ["Chicken Kathi Roll", 180, "Rolls"],
+    ["Chicken Manchurian", 260, "Chinese"],
+    ["Chicken Seekh Kebab", 270, "Kebabs"],
+    ["Chicken Tikka Masala", 290, "Chicken"],
+    ["Chicken Tikka Pizza", 320, "Pizza"],
+    ["Chicken Zinger Burger", 190, "Fast Food"],
+    ["Chilli Paneer", 230, "Chinese"],
+    ["Chocolate Fudge", 90, "Ice Cream"],
+    ["Chocolate Milkshake", 140, "Milkshakes"],
+    ["Chocolate Truffle Slice", 130, "Cakes"],
+    ["Chole Bhature", 180, "North Indian"],
+    ["Classic Cheese Burger", 180, "Burgers"],
+    ["Cola (Can)", 60, "Soft Drinks"],
+    ["Crab Masala", 380, "Seafood"],
+    ["Crispy Corn", 170, "Chinese Starters"],
+    ["Curd Rice", 80, "South Indian"],
+    ["Dal Makhani", 210, "North Indian"],
+    ["Deluxe Veg Thali", 240, "Vegetarian Meals"],
+    ["Egg Biriyani", 210, "Biriyani"],
+    ["Egg Fried Rice", 190, "Fried Rice"],
+    ["Egg Masala", 150, "Egg"],
+    ["Egg Noodles", 190, "Noodles"],
+    ["Egg Podimas", 90, "Egg"],
+    ["Fish Finger", 290, "Starters"],
+    ["Fish Meal", 290, "Non-Vegetarian Meals"],
+    ["French Fries", 110, "Snacks"],
+    ["Fresh Lime Soda", 70, "Juices"],
+    ["Fried Rice & Manchurian Combo", 300, "Combo Meals"],
+    ["Garlic Chicken", 270, "Chinese"],
+    ["Garlic Naan", 65, "Indian Breads"],
+    ["Ghee Roast Dosa", 130, "Breakfast"],
+    ["Goan Fish Curry", 320, "Seafood"],
+    ["Gobi 65", 190, "Starters"],
+    ["Green Salad", 80, "Salads"],
+    ["Grilled Fish Fillet", 350, "Grills"],
+    ["Gulab Jamun (2 pcs)", 80, "Desserts"],
+    ["Hariyali Kebab", 280, "Kebabs"],
+    ["Honey Chilli Potato", 190, "Chinese Starters"],
+    ["Hot and Sour Chicken Soup", 150, "Soups"],
+    ["Hyderabadi Chicken Dum Biriyani", 280, "Biriyani"],
+    ["Idli Sambar (2 pcs)", 60, "Breakfast"],
+    ["Kadai Paneer", 240, "Curries"],
+    ["Kancheepuram Idli", 100, "Idli"],
+    ["Kothu Parotta (Chicken)", 210, "Parotta"],
+    ["Lemon Rice", 90, "South Indian"],
+    ["Malabar Parotta (2 pcs)", 60, "Parotta"],
+    ["Margherita Pizza", 250, "Pizza"],
+    ["Masala Dosa", 110, "Breakfast"],
+    ["Medu Vada (2 pcs)", 70, "Vada"],
+    ["Mutton Biriyani", 340, "Biriyani"],
+    ["Mutton Boti Fry", 360, "Mutton"],
+    ["Mutton Rogan Josh", 360, "Non-Veg Curries"],
+    ["Mutton Sukka", 350, "Mutton"],
+    ["Mysore Masala Dosa", 130, "Dosas"],
+    ["Paneer 65", 220, "Starters"],
+    ["Paneer Butter Masala", 240, "North Indian"],
+    ["Paneer Tikka", 260, "Tandoori"],
+    ["Pepper Chicken Fry", 260, "Chicken"],
+    ["Plain Dosa", 80, "Breakfast"],
+    ["Podi Dosa", 120, "Dosas"],
+    ["Prawn Masala", 340, "Seafood"],
+    ["Prawns Biriyani", 320, "Biriyani"],
+    ["Rava Onion Dosa", 140, "Dosas"],
+    ["Red Sauce Pasta", 230, "Pasta"],
+    ["Reshmi Kebab", 290, "Kebabs"],
+    ["Samosa (2 pcs)", 50, "Snacks"],
+    ["Schezwan Chicken Noodles", 240, "Noodles"],
+    ["Schezwan Veg Fried Rice", 190, "Fried Rice"],
+    ["Shahi Paneer", 260, "North Indian"],
+    ["South Indian Filter Coffee", 50, "Coffee"],
+    ["South Indian Thali", 220, "South Indian"],
+    ["Special Dindigul Thalappakatti Biriyani", 300, "Biriyani"],
+    ["Spicy Paneer Burger", 170, "Burgers"],
+    ["Sweet Corn Veg Soup", 130, "Soups"],
+    ["Tandoori Chicken (Full)", 520, "Tandoori"],
+    ["Tandoori Chicken (Half)", 280, "Tandoori"],
+    ["Tandoori Mushroom", 240, "Tandoori"],
+    ["Tomato Soup", 120, "Soups"],
+    ["Upma", 70, "Breakfast"],
+    ["Vanilla Scoop", 70, "Ice Cream"],
+    ["Vanjaram Fish Fry", 320, "Fish"],
+    ["Veg Chowmein", 170, "Noodles"],
+    ["Veg Dum Biriyani", 200, "Biriyani"],
+    ["Veg Fried Rice", 170, "Fried Rice"],
+    ["Veg Grilled Sandwich", 130, "Sandwiches"],
+    ["Veg Hakka Noodles", 180, "Chinese"],
+    ["Veg Spring Rolls", 160, "Chinese"],
+    ["Veggie Burger", 140, "Fast Food"],
+    ["Virgin Mojito", 130, "Mocktails"],
+    ["Watermelon Juice", 90, "Juices"],
+    ["White Sauce Pasta", 240, "Pasta"],
+  ];
+
+  function matrixMenu(): MenuItem[] {
+    return MATRIX.map(([name, price, categoryId], i) => ({
+      id: `mx${i}`,
+      name,
+      description: "",
+      price,
+      categoryId,
+      imageUrl: "",
+      preparationTime: 10,
+      isAvailable: true,
+      trackStock: false,
+      stockQuantity: 10,
+      lowStockThreshold: 2,
+      createdAt: 0,
+      updatedAt: 0,
+    }));
+  }
+
+  it("all 88 dishes resolve by spoken name with quantity 2", () => {
+    const menu = matrixMenu();
+    const failures: string[] = [];
+    for (const [name] of MATRIX) {
+      const res = fallbackParseVoiceClient(`2 ${name}`, menu);
+      const hit = res.items.find((x) => x.name === name);
+      if (!hit || hit.quantity !== 2) failures.push(name);
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it("resolver maps every matrix name to its real id and price", () => {
+    const menu = matrixMenu();
+    const raw: VoiceOrderResult = {
+      items: MATRIX.map(([name]) => ({ name, quantity: 1 })),
+      notes: "",
+      ambiguous: [],
+      transcript: "everything",
+    };
+    const intent = resolveVoiceIntent(raw, menu);
+    expect(intent.items).toHaveLength(MATRIX.length > 10 ? 10 : MATRIX.length);
+    // Spot-check real id + authoritative price linkage.
+    const byId = new Map(intent.items.map((x) => [x.menuItemId, x]));
+    expect(byId.get("mx0")?.price).toBe(310);
+    expect(byId.get("mx0")?.name).toBe("Al Fahm Chicken");
+  });
+
+  it("item beyond the old 50-item boundary still matches", () => {
+    const fillers: MenuItem[] = Array.from({ length: 60 }, (_, i) => ({
+      id: `f${i}`,
+      name: `Filler Dish Number ${i + 1}`,
+      description: "",
+      price: 100 + i,
+      categoryId: "c9",
+      imageUrl: "",
+      preparationTime: 5,
+      isAvailable: true,
+      trackStock: false,
+      stockQuantity: 10,
+      lowStockThreshold: 2,
+      createdAt: 0,
+      updatedAt: 0,
+    }));
+    const target: MenuItem = {
+      id: "deep55",
+      name: "Dragon Mango Feast",
+      description: "",
+      price: 275,
+      categoryId: "c9",
+      imageUrl: "",
+      preparationTime: 12,
+      isAvailable: true,
+      trackStock: false,
+      stockQuantity: 5,
+      lowStockThreshold: 2,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    const menu = [...fillers.slice(0, 55), target, ...fillers.slice(55)];
+    expect(menu.findIndex((m) => m.id === "deep55")).toBe(55);
+    const res = fallbackParseVoiceClient("2 dragon mango feast", menu);
+    const hit = res.items.find((x) => x.name === "Dragon Mango Feast");
+    expect(hit?.quantity).toBe(2);
+    const intent = resolveVoiceIntent(
+      { items: [{ name: "Dragon Mango Feast", quantity: 2 }], notes: "", ambiguous: [], transcript: "x" },
+      menu
+    );
+    expect(intent.items[0].menuItemId).toBe("deep55");
+    expect(intent.items[0].price).toBe(275);
+  });
+
+  it("tandoori full/half tie asks instead of guessing", () => {
+    const menu = matrixMenu();
+    const res = fallbackParseVoiceClient("one tandoori chicken", menu);
+    expect(res.items).toHaveLength(0);
+    expect(res.ambiguous.length).toBeGreaterThan(0);
+    const opts = res.ambiguous.flatMap((a) => a.options);
+    expect(opts).toContain("Tandoori Chicken (Full)");
+    expect(opts).toContain("Tandoori Chicken (Half)");
+  });
+
+  it("generic category words never auto-add", () => {
+    const menu = matrixMenu();
+    for (const q of ["chicken", "biriyani", "dosa", "juice", "chinese"]) {
+      const res = fallbackParseVoiceClient(q, menu);
+      expect(res.items).toEqual([]);
+    }
+  });
+});
+
 describe("getTranscriptCoverage", () => {
   it("exact transcript scores 1", () => {
     const cov = getTranscriptCoverage("2 chicken biryani", {

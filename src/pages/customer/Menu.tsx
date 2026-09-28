@@ -332,7 +332,7 @@ export default function CustomerMenu() {
           SmartDine AI ordering available: voice and text
         </div>
         <VoiceOrder restaurantId={restaurantId} menu={items} />
-        <NaturalLanguageOrder restaurantId={restaurantId} menu={items} />
+        <NaturalLanguageOrder restaurantId={restaurantId} menu={items} categories={categories} />
       </section>
 
       <section aria-label={activeCat === "all" ? `All menu items, ${activeItems.length} shown` : `Menu items, ${activeItems.length} shown`} className="max-w-lg mx-auto px-4 py-4 space-y-3">
