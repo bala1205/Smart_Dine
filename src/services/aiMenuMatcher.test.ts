@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveVoiceIntent, resolveNaturalIntent, fallbackParseVoiceClient, getTranscriptCoverage } from "./aiMenuMatcher";
+import { resolveVoiceIntent, resolveNaturalIntent, fallbackParseVoiceClient, getTranscriptCoverage, findMenuMatch, normalizeMenuName, levenshtein } from "./aiMenuMatcher";
 import type { MenuItem } from "../types/menu";
 import type { VoiceOrderResult, NaturalLanguageResult } from "../types/aiOrder";
 
@@ -385,6 +385,122 @@ describe("fallbackParseVoiceClient", () => {
     const res = fallbackParseVoiceClient("Chicken Biryani", menu);
     expect(res.items).toHaveLength(1);
     expect(res.ambiguous).toHaveLength(0);
+  });
+});
+
+describe("findMenuMatch — tolerant real-menu matching", () => {
+  it("misspelled Tanglish 'chicken biriyani' resolves to Chicken Biryani", () => {
+    const menu = makeMenu();
+    const hit = findMenuMatch("chicken biriyani", menu);
+    expect(hit.kind).toBe("match");
+    if (hit.kind === "match") expect(hit.item.name).toBe("Chicken Biryani");
+  });
+
+  it("generic 'biryani' with 3 biryanis becomes ambiguous, never a guess", () => {
+    const menu = makeMenu();
+    const hit = findMenuMatch("biryani", menu);
+    expect(hit.kind).toBe("ambiguous");
+    if (hit.kind === "ambiguous") {
+      expect(hit.options.map((o) => o.name)).toContain("Chicken Biryani");
+      expect(hit.options.length).toBeGreaterThan(1);
+    }
+  });
+
+  it("hallucinated 'Fake Pizza' matches nothing", () => {
+    const menu = makeMenu();
+    expect(findMenuMatch("Fake Pizza", menu)).toEqual({ kind: "none" });
+  });
+
+  it("levenshtein sanity", () => {
+    expect(levenshtein("biriyani", "biryani", 2)).toBeLessThanOrEqual(2);
+    expect(levenshtein("pizza", "dosa", 2)).toBeGreaterThan(2);
+    expect(normalizeMenuName("  Chicken-Biryani! ")).toBe("chicken biryani");
+  });
+});
+
+describe("resolveVoiceIntent — fuzzy end to end", () => {
+  it("'2 chicken biriyani' resolves to real Chicken Biryani at menu price", () => {
+    const menu = makeMenu();
+    const raw: VoiceOrderResult = {
+      items: [{ name: "chicken biriyani", quantity: 2 }],
+      notes: "medium spicy no onion",
+      ambiguous: [],
+      transcript: "2 chicken biriyani medium spicy, no onion",
+    };
+    const intent = resolveVoiceIntent(raw, menu);
+    expect(intent.items).toHaveLength(1);
+    expect(intent.items[0].menuItemId).toBe("m1");
+    expect(intent.items[0].quantity).toBe(2);
+    expect(intent.items[0].price).toBe(250);
+    expect(intent.notes).toBe("medium spicy no onion");
+  });
+
+  it("generic dish name produces Did-you-mean options, adds nothing", () => {
+    const menu = makeMenu();
+    const raw: VoiceOrderResult = {
+      items: [{ name: "biryani", quantity: 1 }],
+      notes: "",
+      ambiguous: [],
+      transcript: "biryani",
+    };
+    const intent = resolveVoiceIntent(raw, menu);
+    expect(intent.items).toHaveLength(0);
+    expect(intent.ambiguous?.length).toBe(1);
+    expect(intent.ambiguous?.[0].options.length).toBeGreaterThan(1);
+  });
+});
+
+describe("resolveNaturalIntent — fuzzy", () => {
+  it("truncated 'paneer butter masal' still hits Paneer Butter Masala", () => {
+    const menu = makeMenu();
+    const raw: NaturalLanguageResult = {
+      matches: [{ name: "paneer butter masal", quantity: 1 }],
+      query: "paneer butter masal",
+    };
+    const intent = resolveNaturalIntent(raw, menu);
+    expect(intent.noMatch).toBe(false);
+    expect(intent.matches[0].menuItemId).toBe("m2");
+    expect(intent.matches[0].price).toBe(180);
+  });
+});
+
+describe("fallbackParseVoiceClient — notes + misspellings", () => {
+  it("'2 chicken biryani medium spicy no onion' keeps customization notes", () => {
+    const menu = makeMenu();
+    const res = fallbackParseVoiceClient("2 chicken biryani medium spicy no onion", menu);
+    const chicken = res.items.find((x) => x.name === "Chicken Biryani");
+    expect(chicken?.quantity).toBe(2);
+    expect(res.notes).toContain("onion");
+    expect(res.notes).toContain("spicy");
+  });
+
+  it("'2 chicken biriyani' (misspelled) still matches the real item", () => {
+    const menu = makeMenu();
+    const res = fallbackParseVoiceClient("2 chicken biriyani", menu);
+    const chicken = res.items.find((x) => x.name === "Chicken Biryani");
+    expect(chicken?.quantity).toBe(2);
+  });
+
+  it("clean order has empty notes", () => {
+    const menu = makeMenu();
+    const res = fallbackParseVoiceClient("2 lime juice", menu);
+    expect(res.items[0].name).toBe("Lime Juice");
+    expect(res.notes).toBe("");
+  });
+
+  it("subset title — '2 chicken biriyani' hits 'Hyderabadi Chicken Dum Biriyani' x2", () => {
+    const menu = makeMenu([{ id: "h1", name: "Hyderabadi Chicken Dum Biriyani", price: 280 }]);
+    const res = fallbackParseVoiceClient("2 chicken biriyani medium spicy no onion", menu);
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0].name).toBe("Hyderabadi Chicken Dum Biriyani");
+    expect(res.items[0].quantity).toBe(2);
+    expect(res.notes).toContain("onion");
+  });
+
+  it("subset tie — generic 'chicken' alone adds nothing", () => {
+    const menu = makeMenu();
+    const res = fallbackParseVoiceClient("chicken", menu);
+    expect(res.items).toHaveLength(0);
   });
 });
 

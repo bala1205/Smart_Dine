@@ -14,7 +14,7 @@ export function NaturalLanguageOrder({
   restaurantId: string;
   menu: MenuItem[];
 }) {
-  const { add } = useCart();
+  const { add, setInstruction } = useCart();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [intent, setIntent] = useState<NaturalLanguageIntent | null>(null);
@@ -58,12 +58,20 @@ export function NaturalLanguageOrder({
   };
 
   const handleAdd = (ids: string[]) => {
+    const addedIds: string[] = [];
     for (const id of ids) {
       const match = intent?.matches.find((m) => m.menuItemId === id);
       const menuItem = menu.find((m) => m.id === id);
       if (!menuItem || !match) continue;
       if (!match.available) continue;
       add(menuItem, match.quantity);
+      addedIds.push(menuItem.id);
+    }
+    // Carry customization notes (e.g. "no onion") into the cart's existing
+    // special-instruction field when exactly one dish was confirmed.
+    const notes = intent?.notes?.trim();
+    if (notes && addedIds.length === 1) {
+      setInstruction(addedIds[0], notes.slice(0, 200));
     }
     setIntent(null);
     setQuery("");

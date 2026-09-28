@@ -16,6 +16,7 @@ import ServiceRequestPanel from "../../components/customer/ServiceRequestPanel";
 import { VoiceOrder } from "../../components/customer/VoiceOrder";
 import { NaturalLanguageOrder } from "../../components/customer/NaturalLanguageOrder";
 import { AdaptivePrefsStrip } from "../../components/customer/AdaptivePrefsStrip";
+import { ListenAnnouncer } from "../../components/customer/ListenAnnouncer";
 import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
 import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
 
@@ -69,6 +70,21 @@ export default function CustomerMenu() {
   function scrollToId(id: string) {
     if (typeof document === "undefined") return;
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleSpeak() {
+    setPrefs({ voiceHints: true });
+    scrollToId("sd-voice");
+    // This runs inside the customer's explicit Speak click: activate the
+    // voice interface — focus the mic control and ask VoiceOrder to start
+    // listening. The browser may still require a permission grant; denials
+    // and unsupported browsers show guidance instead of faking success.
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => {
+        document.getElementById("sd-voice-mic")?.focus({ preventScroll: true });
+      }, 450);
+      window.dispatchEvent(new CustomEvent("sd:start-voice"));
+    }
   }
 
   const activeItems = useMemo(() => {
@@ -205,11 +221,20 @@ export default function CustomerMenu() {
       </div>
 
       <AdaptivePrefsStrip
-        onSpeak={() => scrollToId("sd-voice")}
+        onSpeak={handleSpeak}
         onBrowse={() => {
           setPrefs({ voiceHints: false });
           scrollToId("sd-search");
         }}
+      />
+
+      <ListenAnnouncer
+        restaurantName={restaurant?.name || ""}
+        tableNumber={table?.tableNumber ?? null}
+        itemCount={items.length}
+        categoryCount={visibleCategories.length}
+        cartCount={count}
+        cartTotal={total}
       />
 
       <div id="sd-search" className="max-w-lg mx-auto px-4 sticky top-0 z-20 bg-surface-50/95 backdrop-blur supports-[backdrop-filter]:bg-surface-50/85 py-3 scroll-mt-2">

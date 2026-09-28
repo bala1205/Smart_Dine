@@ -219,6 +219,19 @@ export function VoiceOrder({
     };
   }, []);
 
+  // External activation: the Adaptive "Speak" choice dispatches
+  // "sd:start-voice" from a genuine user click, so starting here stays
+  // within the browser gesture/permission window where permitted.
+  const startRef = useRef(startListening);
+  startRef.current = startListening;
+  useEffect(() => {
+    const handler = () => {
+      startRef.current();
+    };
+    window.addEventListener("sd:start-voice", handler);
+    return () => window.removeEventListener("sd:start-voice", handler);
+  }, []);
+
   const handleAdd = () => {
     if (!intent) return;
     const addedIds: string[] = [];
@@ -325,6 +338,7 @@ export function VoiceOrder({
       <div className="mt-4 flex flex-col items-center gap-3" role="group" aria-label="Voice controls">
         {!isListening ? (
           <button
+            id="sd-voice-mic"
             onClick={startListening}
             disabled={state === "PROCESSING" || state === "UNDERSTANDING"}
             aria-label="Start voice ordering"

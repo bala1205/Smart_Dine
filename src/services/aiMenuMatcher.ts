@@ -2,6 +2,139 @@ import type { MenuItem } from "../types/menu";
 import type { VoiceOrderResult, NaturalLanguageResult, OrderIntent, NaturalLanguageIntent } from "../types/aiOrder";
 
 /**
+ * Normalizes a dish name for tolerant comparison: lowercase, punctuation
+ * stripped (Tamil script preserved), whitespace collapsed.
+ */
+export function normalizeMenuName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0b80-\u0bff\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Capped Levenshtein distance (early exit above cap). Pure — unit tested. */
+export function levenshtein(a: string, b: string, cap = 2): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  let prev: number[] = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur: number[] = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      cur.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+export type MenuMatchResult =
+  | { kind: "match"; item: MenuItem }
+  | { kind: "ambiguous"; options: MenuItem[] }
+  | { kind: "none" };
+
+/**
+ * Matches one AI/natural name against the ACTUAL loaded restaurant menu.
+ * Never invents: exact → case-insensitive → normalized → whole-phrase
+ * substring → token-level fuzzy (prefix / small typo, e.g. "biriyani" →
+ * "biryani"). Equally-good multiple candidates become "ambiguous" so the UI
+ * asks "Did you mean …?" instead of guessing. Pure — unit tested.
+ */
+export function findMenuMatch(rawName: string, menu: MenuItem[]): MenuMatchResult {
+  const name = rawName.trim();
+  if (!name || menu.length === 0) return { kind: "none" };
+  const direct = menu.find((m) => m.name === name);
+  if (direct) return { kind: "match", item: direct };
+  const lower = name.toLowerCase();
+  const ci = menu.find((m) => m.name.toLowerCase() === lower);
+  if (ci) return { kind: "match", item: ci };
+  const norm = normalizeMenuName(name);
+  if (!norm) return { kind: "none" };
+  const normHit = menu.find((m) => normalizeMenuName(m.name) === norm);
+  if (normHit) return { kind: "match", item: normHit };
+
+  // Whole-phrase substring ("dosa" inside "Masala Dosa").
+  if (norm.length >= 3) {
+    const sub = menu.filter((m) => normalizeMenuName(m.name).includes(norm));
+    if (sub.length === 1) return { kind: "match", item: sub[0] };
+    if (sub.length > 1) return { kind: "ambiguous", options: sub.slice(0, 5) };
+  }
+
+  // Token-level fuzzy: every query token must resemble a menu-name token.
+  const qToks = norm.split(" ").filter((t) => t.length >= 2);
+  if (qToks.length === 0) return { kind: "none" };
+  const scored: Array<{ m: MenuItem; cost: number }> = [];
+  for (const m of menu) {
+    const mToks = normalizeMenuName(m.name).split(" ").filter(Boolean);
+    let cost = 0;
+    let ok = true;
+    for (const q of qToks) {
+      let best = Infinity;
+      for (const t of mToks) {
+        if (t === q) {
+          best = 0;
+          break;
+        }
+        if (t.startsWith(q) || q.startsWith(t)) {
+          best = Math.min(best, 1);
+          continue;
+        }
+        if (q.length >= 4 && t.length >= 4 && levenshtein(q, t, 1) <= 1) {
+          best = Math.min(best, 2);
+        }
+      }
+      if (best === Infinity) {
+        ok = false;
+        break;
+      }
+      cost += best;
+    }
+    // Reject weak overall resemblance (prevents "fake pizza" style drift).
+    if (ok && cost <= 2 * qToks.length) scored.push({ m, cost });
+  }
+  if (scored.length === 0) return { kind: "none" };
+  scored.sort((a, b) => a.cost - b.cost);
+  if (scored.length === 1 || scored[0].cost < scored[1].cost) {
+    return { kind: "match", item: scored[0].m };
+  }
+  const tied = scored
+    .filter((s) => s.cost === scored[0].cost)
+    .map((s) => s.m)
+    .slice(0, 5);
+  if (tied.length > 1) return { kind: "ambiguous", options: tied };
+  return { kind: "match", item: scored[0].m };
+}
+
+/** Maps AI-provided ambiguous option names to real menu ids (tolerant). */
+function mapAmbiguousOptions(
+  options: string[],
+  menu: MenuItem[]
+): Array<{ id: string; name: string }> {
+  const out: Array<{ id: string; name: string }> = [];
+  const seen = new Set<string>();
+  for (const name of options) {
+    const hit = findMenuMatch(String(name || ""), menu);
+    if (hit.kind === "match" && !seen.has(hit.item.id)) {
+      seen.add(hit.item.id);
+      out.push({ id: hit.item.id, name: hit.item.name });
+    } else if (hit.kind === "ambiguous") {
+      for (const opt of hit.options) {
+        if (!seen.has(opt.id)) {
+          seen.add(opt.id);
+          out.push({ id: opt.id, name: opt.name });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Validates AI intent against actual menu — NEVER trusts AI price/stock/tax.
  * Returns OrderIntent with resolved menuItemId, price, availability.
  */
@@ -9,14 +142,9 @@ export function resolveVoiceIntent(
   result: VoiceOrderResult,
   menu: MenuItem[]
 ): OrderIntent {
-  const menuByName = new Map<string, MenuItem>();
-  for (const m of menu) menuByName.set(m.name, m);
-  // Also case-insensitive map for robustness
-  const lowerMap = new Map<string, MenuItem>();
-  for (const m of menu) lowerMap.set(m.name.toLowerCase(), m);
-
   const items: OrderIntent["items"] = [];
   const seen = new Set<string>();
+  const extraAmbiguous: NonNullable<OrderIntent["ambiguous"]> = [];
 
   const rawItems = Array.isArray((result as unknown as { items?: unknown })?.items)
     ? (result as { items: Array<{ name?: unknown; quantity?: unknown }> }).items
@@ -25,8 +153,16 @@ export function resolveVoiceIntent(
     if (!it || typeof it !== "object") continue;
     const name = String((it as { name?: unknown }).name || "").trim();
     if (!name) continue;
-    const exact = menuByName.get(name) || lowerMap.get(name.toLowerCase());
-    if (!exact) continue; // hallucinated — skip
+    const hit = findMenuMatch(name, menu);
+    if (hit.kind === "ambiguous") {
+      extraAmbiguous.push({
+        query: name,
+        options: hit.options.map((o) => ({ id: o.id, name: o.name })),
+      });
+      continue;
+    }
+    if (hit.kind === "none") continue; // hallucinated — skip
+    const exact = hit.item;
     if (seen.has(exact.id)) {
       const ex = items.find((x) => x.menuItemId === exact.id);
       if (ex) ex.quantity = Math.min(20, ex.quantity + Math.max(1, Math.min(20, Math.floor(Number((it as { quantity?: unknown }).quantity) || 1))));
@@ -47,14 +183,14 @@ export function resolveVoiceIntent(
   const ambiguous = (result.ambiguous || [])
     .map((a) => ({
       query: a.query,
-      options: a.options
-        .map((name) => {
-          const m = menuByName.get(name) || lowerMap.get(name.toLowerCase());
-          return m ? { id: m.id, name: m.name } : null;
-        })
-        .filter(Boolean) as Array<{ id: string; name: string }>,
+      options: mapAmbiguousOptions(a.options, menu),
     }))
     .filter((a) => a.options.length > 1);
+  for (const extra of extraAmbiguous) {
+    if (extra.options.length > 1 && !ambiguous.some((a) => a.query === extra.query)) {
+      ambiguous.push(extra);
+    }
+  }
 
   return {
     items: items.slice(0, 10),
@@ -68,20 +204,17 @@ export function resolveNaturalIntent(
   result: NaturalLanguageResult,
   menu: MenuItem[]
 ): NaturalLanguageIntent {
-  const menuByName = new Map<string, MenuItem>();
-  for (const m of menu) menuByName.set(m.name, m);
-  const lowerMap = new Map<string, MenuItem>();
-  for (const m of menu) lowerMap.set(m.name.toLowerCase(), m);
-
   if (result.noMatch) {
-    return { matches: [], noMatch: true, reason: result.reason || "No matching item is currently available.", query: result.query };
+    return { matches: [], noMatch: true, reason: result.reason || "No matching item is currently available.", query: result.query, notes: "" };
   }
 
   const matches: NaturalLanguageIntent["matches"] = [];
   const seen = new Set<string>();
   for (const it of result.matches) {
-    const m = menuByName.get(it.name) || lowerMap.get(it.name.toLowerCase());
-    if (!m) continue;
+    const hit = findMenuMatch(String(it.name || ""), menu);
+    // Natural path has no ambiguous UI — only accept a single confident hit.
+    if (hit.kind !== "match") continue;
+    const m = hit.item;
     if (seen.has(m.id)) continue;
     seen.add(m.id);
     matches.push({
@@ -95,10 +228,10 @@ export function resolveNaturalIntent(
   }
 
   if (matches.length === 0) {
-    return { matches: [], noMatch: true, reason: "No matching item is currently available.", query: result.query };
+    return { matches: [], noMatch: true, reason: "No matching item is currently available.", query: result.query, notes: "" };
   }
 
-  return { matches, noMatch: false, reason: result.reason, query: result.query };
+  return { matches, noMatch: false, reason: result.reason, query: result.query, notes: result.notes?.slice(0, 200) || "" };
 }
 
 function isOutOfStock(m: MenuItem): boolean {
@@ -193,8 +326,26 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
     })
     .sort((a, b) => b.norm.length - a.norm.length);
 
+  // Tolerant dish-token comparison: exact (singular/plural already applied by
+  // callers) plus single-typo tokens ("biriyani" vs "biryani") so real speech
+  // still hits the real menu item. Strict prefix fragments are deliberately
+  // NOT matched here — they flow to the partial-speech pass which asks
+  // "Did you mean …?" instead of guessing.
+  const dishTokensMatch = (nameToks: string[], sliceToks: string[]): boolean => {
+    if (nameToks.length !== sliceToks.length) return false;
+    return nameToks.every((w, k) => {
+      const s = sliceToks[k];
+      if (w === s) return true;
+      if (w.length >= 4 && s.length >= 4 && levenshtein(w, s, 1) <= 1) return true;
+      return false;
+    });
+  };
+
   const result: Array<{ name: string; quantity: number }> = [];
   const used = new Set<string>();
+  // Token positions consumed by dish/quantity matches — leftovers become
+  // customization notes (e.g. "medium spicy, no onion"), never silently lost.
+  const consumedIdx = new Set<number>();
   let i = 0;
   while (i < tokens.length) {
     let qty = toNum(rawTokens[i] || tokens[i]);
@@ -210,14 +361,15 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
       const nameTokens = mn.normSingular.split(/\s+/).filter(Boolean);
       const start = i + consumed;
       if (start + nameTokens.length > tokens.length) continue;
-      const slice = tokens.slice(start, start + nameTokens.length).join(" ");
-      if (slice === mn.normSingular) {
+      const sliceToks = tokens.slice(start, start + nameTokens.length);
+      if (dishTokensMatch(nameTokens, sliceToks)) {
         matched = mn;
         matchedLen = nameTokens.length;
         break;
       }
     }
     if (matched) {
+      for (let k = i; k < i + consumed + matchedLen; k++) consumedIdx.add(k);
       if (!used.has(matched.item.id)) {
         result.push({ name: matched.item.name, quantity: qty! });
         used.add(matched.item.id);
@@ -247,6 +399,50 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
       }
       result.push({ name: mn.item.name, quantity: inferredQty });
       used.add(mn.item.id);
+    }
+  }
+  // Subset pass: the transcript names a real dish without its full menu title
+  // ("chicken biriyani" → "Hyderabadi Chicken Dum Biriyani"). Emits only a
+  // UNIQUE best-scoring real item; ties fall through to suggestions / the
+  // "Did you mean …?" pass so nothing uncertain is ever auto-added.
+  if (result.length === 0) {
+    const scored: Array<{ mn: (typeof menuNorm)[0]; score: number; firstIdx: number; tokIdx: number[] }> = [];
+    for (const mn of menuNorm) {
+      const nameToks = mn.normSingular.split(/\s+/).filter(Boolean);
+      const usedTok = new Set<number>();
+      const tokIdx: number[] = [];
+      let score = 0;
+      for (const w of nameToks) {
+        const idx = tokens.findIndex(
+          (t, k) =>
+            !usedTok.has(k) &&
+            (t === w || (t.length >= 4 && w.length >= 4 && levenshtein(t, w, 1) <= 1))
+        );
+        if (idx >= 0) {
+          usedTok.add(idx);
+          tokIdx.push(idx);
+          score++;
+        }
+      }
+      const need = Math.min(2, nameToks.length);
+      if (score >= need && score > 0) {
+        scored.push({ mn, score, firstIdx: Math.min(...tokIdx), tokIdx });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score || a.mn.norm.length - b.mn.norm.length);
+    if (scored.length > 0 && (scored.length === 1 || scored[0].score > scored[1].score)) {
+      const win = scored[0];
+      let q = 1;
+      if (win.firstIdx > 0) {
+        const pq = toNum(rawTokens[win.firstIdx - 1] || tokens[win.firstIdx - 1]);
+        if (pq != null) {
+          q = pq;
+          consumedIdx.add(win.firstIdx - 1);
+        }
+      }
+      for (const k of win.tokIdx) consumedIdx.add(k);
+      result.push({ name: win.mn.item.name, quantity: q });
+      used.add(win.mn.item.id);
     }
   }
   const dedup = new Map<string, number>();
@@ -297,7 +493,20 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
       }
     }
   }
-  return { items, notes: "", ambiguous: ambiguous.slice(0, 3), transcript };
+  // Leftover transcript words (not part of any dish/quantity match) become
+  // customization notes for the cart instruction — e.g. "medium spicy" or
+  // "no onion" in "2 chicken biriyani medium spicy, no onion".
+  const notes = tokens
+    .filter((t, idx) => {
+      if (consumedIdx.has(idx)) return false;
+      if (!t || t.length < 2) return false;
+      if (TAMIL_STOP_WORDS.has(t)) return false;
+      if (toNum(t) != null) return false;
+      return true;
+    })
+    .join(" ")
+    .slice(0, 200);
+  return { items, notes, ambiguous: ambiguous.slice(0, 3), transcript };
 }
 
 /**

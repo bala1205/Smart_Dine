@@ -107,6 +107,11 @@ export function OrderIntentPreview({
             <span>Preview total</span>
             <span>{formatCurrency(total)}</span>
           </div>
+          {intent.notes?.trim() && (
+            <p className="text-[13px] text-ink-600 bg-surface-50 border border-surface-200 rounded-xl px-3 py-2" role="note">
+              Kitchen note: “{intent.notes.trim()}” — will be added to your cart as an instruction.
+            </p>
+          )}
           <p className="text-xs text-ink-400">GST and service charge will be calculated at checkout.</p>
         </div>
       )}
@@ -214,6 +219,11 @@ export function NaturalIntentPreview({
           <span>Preview</span>
           <span>{formatCurrency(total)}</span>
         </div>
+      )}
+      {intent.notes?.trim() && (
+        <p className="text-[13px] text-ink-600 bg-surface-50 border border-surface-200 rounded-xl px-3 py-2 mt-2" role="note">
+          Kitchen note: “{intent.notes.trim()}” — will be added to your cart as an instruction.
+        </p>
       )}
       <div className="flex gap-3 mt-4">
         <button

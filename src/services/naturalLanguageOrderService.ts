@@ -6,20 +6,6 @@ import { resolveNaturalIntent } from "./aiMenuMatcher";
 import { fallbackParseVoiceClient } from "./aiMenuMatcher";
 
 const MAX_QUERY = 500;
-const MAX_MENU_FOR_AI = 50;
-
-function toMinimalMenu(menu: MenuItem[]) {
-  return menu
-    .filter((m) => m.isAvailable)
-    .slice(0, MAX_MENU_FOR_AI)
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      category: m.categoryId,
-      description: m.description?.slice(0, 80) || "",
-      available: true,
-    }));
-}
 
 // Tamil transliteration for natural language fallback
 function transliterateTamilForNatural(s: string): string {
@@ -53,14 +39,14 @@ function fallbackNatural(query: string, menu: MenuItem[]): NaturalLanguageResult
   const exact = menu.find((m) => normalize(m.name) === exactNorm);
   if (exact) {
     const wantsTwo = /two|2 people|for two|rendu|irandu/i.test(lower);
-    return { matches: [{ name: exact.name, quantity: wantsTwo ? 2 : 1 }], query };
+    return { matches: [{ name: exact.name, quantity: wantsTwo ? 2 : 1 }], query, notes: "" };
   }
   // Also check if lower contains an exact dish name as a whole phrase
   for (const m of menu) {
     const normName = normalize(m.name);
     if (lower === normName || lower.includes(` ${normName} `) || lower.startsWith(`${normName} `) || lower.endsWith(` ${normName}`)) {
       const wantsTwo = /two|2 people|for two|rendu|irandu/i.test(lower);
-      return { matches: [{ name: m.name, quantity: wantsTwo ? 2 : 1 }], query };
+      return { matches: [{ name: m.name, quantity: wantsTwo ? 2 : 1 }], query, notes: "" };
     }
   }
 
@@ -71,9 +57,9 @@ function fallbackNatural(query: string, menu: MenuItem[]): NaturalLanguageResult
     // Check if any fb item is an exact match for the query
     const exactFb = fb.items.find((it) => normalize(it.name) === exactNorm);
     if (exactFb) {
-      return { matches: [{ name: exactFb.name, quantity: exactFb.quantity }], query };
+      return { matches: [{ name: exactFb.name, quantity: exactFb.quantity }], query, notes: fb.notes };
     }
-    return { matches: fb.items.map((it) => ({ name: it.name, quantity: it.quantity })), query };
+    return { matches: fb.items.map((it) => ({ name: it.name, quantity: it.quantity })), query, notes: fb.notes };
   }
   // Broad recommendation fallback for "something spicy", "chicken dishes" etc.
   const wantsVeg = /veg|vegetarian|சைவ|saiva/i.test(query);
@@ -135,9 +121,10 @@ export async function parseNaturalLanguage(
       err?.message?.toLowerCase().includes("not found");
 
     if (isNotDeployed) {
-      const minimal = toMinimalMenu(menu);
-      const filteredMenu = menu.filter((m) => minimal.some((mm) => mm.id === m.id));
-      return resolveNaturalIntent(fallbackNatural(clean, filteredMenu), menu);
+      // Deterministic fallback runs against the FULL loaded restaurant menu
+      // (never a truncated subset) so dishes beyond the AI prompt cap still
+      // resolve; prices/availability stay authoritative from the same menu.
+      return resolveNaturalIntent(fallbackNatural(clean, menu), menu);
     }
     try {
       const fb = fallbackNatural(clean, menu);

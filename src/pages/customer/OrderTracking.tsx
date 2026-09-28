@@ -14,6 +14,7 @@ import { STATUS_LABELS, StatusBadge } from "../../components/common/StatusBadge"
 import { PageLoader } from "../../components/common/Spinner";
 import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
 import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
+import { useAutoSpeak } from "../../hooks/useAutoSpeak";
 import type { Order, OrderItem, OrderStatus } from "../../types/order";
 
 const STEPS: OrderStatus[] = ["PLACED", "PREPARING", "READY", "SERVED"];
@@ -28,6 +29,14 @@ export default function OrderTracking() {
   const [items, setItems] = useState<OrderItem[]>([]);
   const [error, setError] = useState(false);
   const { prefs } = useAdaptivePrefs();
+
+  // Listen mode: announce the order status aloud once it loads/changes.
+  useAutoSpeak(
+    order
+      ? `Order status: ${STATUS_LABELS[order.status]}. Table ${order.tableNumber}.`
+      : "",
+    prefs.listen && !!order
+  );
 
   useEffect(() => {
     if (!orderId || !restaurantId || !token) {

@@ -51,6 +51,34 @@ export function stopReadAloud(): void {
   }
 }
 
+export function pauseReadAloud(): void {
+  try {
+    if (isReadAloudSupported() && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+      window.speechSynthesis.pause();
+    }
+  } catch {
+    // never break UI
+  }
+}
+
+export function resumeReadAloud(): void {
+  try {
+    if (isReadAloudSupported() && window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+  } catch {
+    // never break UI
+  }
+}
+
+export function isSpeechPaused(): boolean {
+  try {
+    return isReadAloudSupported() && window.speechSynthesis.paused;
+  } catch {
+    return false;
+  }
+}
+
 export function speakText(
   text: string,
   opts?: { locale?: string; rate?: number; onEnd?: () => void; onError?: () => void }

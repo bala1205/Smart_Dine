@@ -18,6 +18,8 @@ export type NaturalLanguageIntent = {
   noMatch: boolean;
   reason?: string;
   query?: string;
+  /** Customization leftovers (e.g. "no onion") → cart instruction. */
+  notes?: string;
 };
 
 export type VoiceState =
@@ -40,4 +42,6 @@ export type NaturalLanguageResult = {
   noMatch?: boolean;
   reason?: string;
   query: string;
+  /** Customization leftovers (e.g. "no onion") → cart instruction. */
+  notes?: string;
 };

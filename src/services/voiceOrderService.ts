@@ -5,20 +5,6 @@ import type { VoiceOrderResult, OrderIntent } from "../types/aiOrder";
 import { resolveVoiceIntent, fallbackParseVoiceClient } from "./aiMenuMatcher";
 
 const MAX_TRANSCRIPT = 500;
-const MAX_MENU_FOR_AI = 50;
-
-function toMinimalMenu(menu: MenuItem[]) {
-  return menu
-    .filter((m) => m.isAvailable)
-    .slice(0, MAX_MENU_FOR_AI)
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      category: m.categoryId,
-      description: m.description?.slice(0, 80) || "",
-      available: true,
-    }));
-}
 
 export async function parseVoiceOrder(
   restaurantId: string,
@@ -48,9 +34,9 @@ export async function parseVoiceOrder(
       err?.message?.toLowerCase().includes("not found");
 
     if (isNotDeployed) {
-      const minimal = toMinimalMenu(menu);
-      // Use client fallback with minimal menu (still authoritative menu for price)
-      const fb = fallbackParseVoiceClient(clean, menu.filter((m) => minimal.some((mm) => mm.id === m.id)));
+      // Deterministic client fallback runs against the FULL loaded restaurant
+      // menu (never a truncated subset) with the same authoritative prices.
+      const fb = fallbackParseVoiceClient(clean, menu);
       return resolveVoiceIntent(fb, menu);
     }
     // For other errors, also fallback to client to keep ordering usable

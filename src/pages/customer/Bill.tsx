@@ -10,6 +10,7 @@ import { PageLoader } from "../../components/common/Spinner";
 import { Button } from "../../components/common/Button";
 import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
 import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
+import { useAutoSpeak } from "../../hooks/useAutoSpeak";
 import { Download, Share2, Split, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import type { Order, OrderItem } from "../../types/order";
@@ -159,6 +160,16 @@ export default function DigitalBill() {
     );
     return () => unsub();
   }, [restaurantId, orderId]);
+
+  // Listen mode: announce the bill summary aloud once it loads.
+  useAutoSpeak(
+    order
+      ? `Bill total ${Math.round(order.grandTotal ?? order.totalAmount)} rupees. ${
+          order.paymentStatus === "PAID" ? "Bill paid." : "Payment pending."
+        }`
+      : "",
+    prefs.listen && !!order
+  );
 
   if (loading) return <div className="min-h-screen bg-surface-50 flex items-center justify-center"><PageLoader label="Loading bill..." /></div>;
   if (!order) return <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4"><div className="text-center bg-white rounded-2xl border border-surface-200 shadow-card p-8 max-w-sm"><p className="text-sm font-semibold text-ink-900">Order not found</p><p className="text-sm text-ink-500 mt-1">This bill link may be invalid or expired.</p><button onClick={() => navigate(-1)} className="mt-4 text-sm font-semibold text-brand-700 hover:underline underline-offset-2">Go back</button></div></div>;

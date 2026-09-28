@@ -14,9 +14,13 @@ function isDismissed(): boolean {
 }
 
 /**
- * Optional, dismissible "How would you like to order?" preference strip.
+ * Compact Adaptive Dining entry prompt ("How would you like to order?").
  * Tap & Browse remains the untouched default — this layer only ADDS optional
  * presentation/interaction choices. No disability labels, no mandatory steps.
+ *
+ * Entry behavior: the prompt collapses into a small "Ordering preferences"
+ * pill as soon as the customer makes ANY choice (or dismisses it), so the
+ * restaurant menu stays the primary content. Reopening restores the prompt.
  */
 export function AdaptivePrefsStrip({
   onSpeak,
@@ -35,6 +39,15 @@ export function AdaptivePrefsStrip({
     } catch {
       // ignore
     }
+  }
+
+  /**
+   * Apply a preference patch, then collapse the entry prompt so the menu
+   * becomes the primary content. The pill reopens it on demand.
+   */
+  function choose(patch: Parameters<typeof setPrefs>[0]) {
+    setPrefs(patch);
+    dismiss();
   }
 
   function reopen() {
@@ -93,7 +106,10 @@ export function AdaptivePrefsStrip({
         <div className="flex flex-wrap gap-2 mt-3" role="group" aria-label="Interaction style">
           <button
             type="button"
-            onClick={onBrowse}
+            onClick={() => {
+              onBrowse();
+              dismiss();
+            }}
             aria-pressed={!prefs.voiceHints}
             className={`${toggleBtn} ${
               !prefs.voiceHints
@@ -109,6 +125,7 @@ export function AdaptivePrefsStrip({
             onClick={() => {
               setPrefs({ voiceHints: true });
               onSpeak();
+              dismiss();
             }}
             aria-pressed={prefs.voiceHints}
             className={`${toggleBtn} ${
@@ -122,7 +139,7 @@ export function AdaptivePrefsStrip({
           </button>
           <button
             type="button"
-            onClick={() => setPrefs({ listen: !prefs.listen })}
+            onClick={() => choose({ listen: !prefs.listen })}
             aria-pressed={prefs.listen}
             className={`${toggleBtn} ${
               prefs.listen
@@ -138,7 +155,7 @@ export function AdaptivePrefsStrip({
         <div className="flex flex-wrap gap-2 mt-2" role="group" aria-label="Reading preferences">
           <button
             type="button"
-            onClick={() => setPrefs({ largeText: !prefs.largeText })}
+            onClick={() => choose({ largeText: !prefs.largeText })}
             aria-pressed={prefs.largeText}
             className={`${toggleBtn} ${
               prefs.largeText
@@ -151,7 +168,7 @@ export function AdaptivePrefsStrip({
           </button>
           <button
             type="button"
-            onClick={() => setPrefs({ highContrast: !prefs.highContrast })}
+            onClick={() => choose({ highContrast: !prefs.highContrast })}
             aria-pressed={prefs.highContrast}
             className={`${toggleBtn} ${
               prefs.highContrast
@@ -176,7 +193,7 @@ export function AdaptivePrefsStrip({
             <button
               key={opt.code}
               type="button"
-              onClick={() => setPrefs({ language: opt.code })}
+              onClick={() => choose({ language: opt.code })}
               aria-pressed={prefs.language === opt.code}
               aria-label={`Order in ${opt.label}`}
               className={`pressable px-3 py-1.5 min-h-[34px] rounded-full text-xs font-semibold border transition-colors ${
