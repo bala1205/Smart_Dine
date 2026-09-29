@@ -20,8 +20,9 @@ const STR: Record<AdaptiveLanguage, Strings> = {
   en: {
     welcomeKicker: "SmartDine",
     welcomeTo: "Welcome to",
-    tagline: "Find an available table and start ordering.",
-    check: "Check Table Availability",
+    tagline: "Select an available table and start your order.",
+    availIntro: "Select an available table and start your order.",
+    check: "View Available Tables",
     info: "Restaurant info",
     address: "Address",
     phone: "Phone",
@@ -51,7 +52,8 @@ const STR: Record<AdaptiveLanguage, Strings> = {
     welcomeKicker: "SmartDine",
     welcomeTo: "Welcome to",
     tagline: "Available table select panni order start pannunga.",
-    check: "Table Availability Paarunga",
+    availIntro: "Available table select panni order start pannunga.",
+    check: "Available Tables Paarunga",
     info: "Restaurant info",
     address: "Address",
     phone: "Phone",
@@ -81,7 +83,8 @@ const STR: Record<AdaptiveLanguage, Strings> = {
     welcomeKicker: "SmartDine",
     welcomeTo: "வருக",
     tagline: "கிடைக்கும் டேபிளை தேர்ந்து ஆர்டர் செய்யுங்கள்.",
-    check: "டேபிள் விவரம் பார்க்க",
+    availIntro: "கிடைக்கும் டேபிளை தேர்ந்து ஆர்டர் செய்யுங்கள்.",
+    check: "கிடைக்கும் டேபிள்களை பார்க்க",
     info: "உணவக விவரம்",
     address: "முகவரி",
     phone: "தொலைபேசி",
@@ -271,6 +274,7 @@ export default function CustomerTableCheck() {
                   <RefreshCw className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
+              <p className="text-sm text-ink-600 mt-2">{S.availIntro}</p>
 
               {error && (
                 <p role="alert" className="mt-3 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
@@ -312,6 +316,20 @@ export default function CustomerTableCheck() {
                 </div>
               )}
 
+              {reserved.length > 0 && (
+                <div className="mt-5">
+                  <h3 className="text-xs font-bold tracking-wide uppercase text-ink-500">{S.reserved} ({reserved.length})</h3>
+                  <ul className="mt-2 space-y-2.5">
+                    {reserved.map((m) => (
+                      <li key={m.table.id} className="bg-surface-50 border border-surface-200 rounded-2xl px-4 py-3">
+                        <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
+                        <span className="block text-xs text-ink-500 mt-1">{S.reserved} • {S.reservedNote}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {occupied.length > 0 && (
                 <div className="mt-5">
                   <h3 className="text-xs font-bold tracking-wide uppercase text-ink-500">{S.occupied} ({occupied.length})</h3>
@@ -322,11 +340,9 @@ export default function CustomerTableCheck() {
                         <span className="flex items-center gap-1.5 text-xs text-ink-500 mt-1">
                           <Clock className="w-3.5 h-3.5" aria-hidden="true" />
                           {S.occupied}
-                          {m.wait && m.wait.remainingMinutes != null && m.wait.label === "approx"
+                          {m.wait && (m.wait.label === "approx" || m.wait.label === "payment")
                             ? ` • ${formatWaitLabel(m.wait, lang)}`
-                            : m.wait && m.wait.label === "payment"
-                              ? ` • ${formatWaitLabel(m.wait, lang)}`
-                              : ""}
+                            : ""}
                         </span>
                       </li>
                     ))}
@@ -342,20 +358,6 @@ export default function CustomerTableCheck() {
                       <li key={m.table.id} className="bg-amber-50/60 border border-amber-200 rounded-2xl px-4 py-3">
                         <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
                         <span className="block text-xs text-amber-700 mt-1 font-medium">{S.paymentPending}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {reserved.length > 0 && (
-                <div className="mt-5">
-                  <h3 className="text-xs font-bold tracking-wide uppercase text-ink-500">{S.reserved} ({reserved.length})</h3>
-                  <ul className="mt-2 space-y-2.5">
-                    {reserved.map((m) => (
-                      <li key={m.table.id} className="bg-surface-50 border border-surface-200 rounded-2xl px-4 py-3">
-                        <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
-                        <span className="block text-xs text-ink-500 mt-1">{S.reserved} • {S.reservedNote}</span>
                       </li>
                     ))}
                   </ul>

@@ -120,6 +120,9 @@ export function useTableCheck(restaurantId?: string | null) {
                 preparationTime: menu?.preparationTime ?? 0,
                 categoryName: menu ? catById.get(menu.categoryId) || "" : "",
                 quantity: oi.quantity,
+                // Real dish name drives the food-reference prep range;
+                // falls back to the order snapshot name when menu is loading.
+                name: menu?.name ?? oi.itemName,
               };
             }),
           },

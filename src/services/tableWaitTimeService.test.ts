@@ -3,6 +3,7 @@ import {
   estimateTableWait,
   formatWaitLabel,
   categoryPrepDefault,
+  preparationRangeForOrder,
   RESTAURANT_DEFAULT_PREP_MIN,
   type WaitTimeInput,
 } from "./tableWaitTimeService";
@@ -30,8 +31,29 @@ describe("categoryPrepDefault", () => {
   });
 });
 
+describe("preparationRangeForOrder — additive with quantity", () => {
+  const item = (name: string, quantity: number) => ({ preparationTime: 0, categoryName: "", quantity, name });
+  it("1 Egg Biriyani → 18–25", () => {
+    expect(preparationRangeForOrder([item("Egg Biriyani", 1)])).toMatchObject({ min: 18, max: 25 });
+  });
+  it("2 Egg Biriyani → 36–50", () => {
+    expect(preparationRangeForOrder([item("Egg Biriyani", 2)])).toMatchObject({ min: 36, max: 50 });
+  });
+  it("1 Egg Biriyani + 1 Samosa → 23–33", () => {
+    expect(preparationRangeForOrder([item("Egg Biriyani", 1), item("Samosa", 1)])).toMatchObject({ min: 23, max: 33 });
+  });
+  it("2 Egg Biriyani + 1 Samosa → 41–58", () => {
+    expect(preparationRangeForOrder([item("Egg Biriyani", 2), item("Samosa", 1)])).toMatchObject({ min: 41, max: 58 });
+  });
+  it("1 Hyderabadi + 1 Cappuccino → 30–45", () => {
+    expect(
+      preparationRangeForOrder([item("Hyderabadi Chicken Dum Biriyani", 1), item("Cappuccino", 1)])
+    ).toMatchObject({ min: 30, max: 45 });
+  });
+});
+
 describe("estimateTableWait — NEW order", () => {
-  it("PLACED uses real prep + dining, rounded", () => {
+  it("PLACED adds prep + dining, keeps range", () => {
     const est = estimateTableWait(
       base({
         items: [
@@ -41,11 +63,32 @@ describe("estimateTableWait — NEW order", () => {
       }),
       NOW
     )!;
-    // prep = max(20,10) + 2*1 = 22; dining = 25; total 47 → 45
-    expect(est.remainingMinutes).toBe(45);
+    // prep = 20×1 + 10×2 = 40; dining = 25; total 65–65
+    expect(est.preparationMinMinutes).toBe(40);
+    expect(est.preparationMaxMinutes).toBe(40);
+    expect(est.remainingMinMinutes).toBe(65);
+    expect(est.remainingMaxMinutes).toBe(65);
+    expect(est.remainingMinutes).toBe(65);
     expect(est.label).toBe("approx");
     expect(est.confidence).toBe("MEDIUM");
     expect(est.basis).toBe("placed-full");
+  });
+  it("PLACED with reference ranges keeps min/max", () => {
+    const est = estimateTableWait(
+      base({
+        items: [
+          { preparationTime: 0, categoryName: "Biriyani", quantity: 2, name: "Egg Biriyani" },
+          { preparationTime: 0, categoryName: "Snacks", quantity: 1, name: "Samosa" },
+        ],
+      }),
+      NOW
+    )!;
+    // prep 41–58; dining: distinct 2, qty 3 → 25; remaining 66–83
+    expect(est.preparationMinMinutes).toBe(41);
+    expect(est.preparationMaxMinutes).toBe(58);
+    expect(est.remainingMinMinutes).toBe(65);
+    expect(est.remainingMaxMinutes).toBe(85);
+    expect(formatWaitLabel(est, "en")).toBe("Approx. 65–85 min remaining");
   });
   it("PLACED falls back transparently when prep unknown", () => {
     const est = estimateTableWait(
@@ -142,11 +185,18 @@ describe("estimateTableWait — rounding and clamping", () => {
 });
 
 describe("formatWaitLabel", () => {
-  it("localizes approx + unavailable", () => {
-    const approx = { remainingMinutes: 20, label: "approx", confidence: "MEDIUM", basis: "x" } as const;
-    expect(formatWaitLabel(approx, "en")).toBe("Approx. 20 min remaining");
-    expect(formatWaitLabel(approx, "ta")).toContain("20");
-    const un = { remainingMinutes: null, label: "unavailable", confidence: "LOW", basis: "x" } as const;
+  it("localizes approx range, single, + unavailable", () => {
+    const range = {
+      remainingMinutes: 25, remainingMinMinutes: 20, remainingMaxMinutes: 30,
+      preparationMinMinutes: 18, preparationMaxMinutes: 25,
+      diningMinMinutes: 25, diningMaxMinutes: 25,
+      label: "approx", confidence: "MEDIUM", basis: "x",
+    } as const;
+    expect(formatWaitLabel(range, "en")).toBe("Approx. 20–30 min remaining");
+    expect(formatWaitLabel(range, "ta")).toContain("20");
+    const single = { ...range, remainingMinMinutes: 25, remainingMaxMinutes: 25 };
+    expect(formatWaitLabel(single, "en")).toBe("Approx. 25 min remaining");
+    const un = { ...range, remainingMinutes: null, remainingMinMinutes: null, remainingMaxMinutes: null, label: "unavailable" } as const;
     expect(formatWaitLabel(un, "en")).toContain("unavailable");
   });
 });

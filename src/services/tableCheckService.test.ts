@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canOwnerReleaseTable,
   decideReservation,
   isReservationLive,
   reservationDocPath,
@@ -156,6 +157,54 @@ describe("resolveTableCheckStatus", () => {
       reservation: res("mine", NOW + 60_000), sessionId: "mine", now: NOW,
     });
     expect(beaten.status).toBe("OCCUPIED");
+  });
+  it("owner release gate: only RESERVED may be released", () => {
+    expect(canOwnerReleaseTable("RESERVED")).toBe(true);
+    expect(canOwnerReleaseTable("AVAILABLE")).toBe(false);
+    expect(canOwnerReleaseTable("OCCUPIED")).toBe(false);
+    expect(canOwnerReleaseTable("PAYMENT_PENDING")).toBe(false);
+  });
+  it("owner release case 4: expired reservation already reads AVAILABLE", () => {
+    const r = resolveTableCheckStatus({
+      table: table(), ordersForTable: [],
+      reservation: res("gone", NOW - 1000), sessionId: "owner-view", now: NOW,
+    });
+    expect(r.status).toBe("AVAILABLE");
+    // …so no owner action is required for stale holds.
+    expect(canOwnerReleaseTable(r.status)).toBe(false);
+  });
+  it("owner release cases 2+3: live order / payment-pending never releasable", () => {
+    const occ = resolveTableCheckStatus({
+      table: table(), ordersForTable: [order({ status: "PREPARING" })],
+      reservation: null, now: NOW,
+    });
+    expect(occ.status).toBe("OCCUPIED");
+    expect(canOwnerReleaseTable(occ.status)).toBe(false);
+    const pay = resolveTableCheckStatus({
+      table: table(), ordersForTable: [order({ status: "SERVED", paymentStatus: "PENDING" })],
+      reservation: null, now: NOW,
+    });
+    expect(pay.status).toBe("PAYMENT_PENDING");
+    expect(canOwnerReleaseTable(pay.status)).toBe(false);
+  });
+  it("owner release case 1: live reservation without order is releasable", () => {
+    const r = resolveTableCheckStatus({
+      table: table(), ordersForTable: [],
+      reservation: res("guest", NOW + 60_000), sessionId: "owner-view", now: NOW,
+    });
+    expect(r.status).toBe("RESERVED");
+    expect(canOwnerReleaseTable(r.status)).toBe(true);
+  });
+  it("firestore rules: only owners may delete reservations", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const rulesPath = fileURLToPath(new URL("../../firestore.rules", import.meta.url));
+    const rules = readFileSync(rulesPath, "utf8");
+    const block = rules.slice(rules.indexOf("match /tableReservations/"));
+    expect(block).toContain("allow delete: if isOwnerOf(restaurantId);");
+    // No guest/customer delete path exists in the reservation rules.
+    expect(block).not.toMatch(/allow delete: if true/);
+    expect(block).not.toMatch(/allow delete:[^;]*validGuest/);
   });
   it("reservation → order transition: own order holds the table, no self-conflict", () => {
     // Customer reserves, enters menu, places order through the EXISTING flow

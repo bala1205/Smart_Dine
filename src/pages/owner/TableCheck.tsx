@@ -3,12 +3,18 @@ import { toast } from "sonner";
 import { Download, Printer, Copy, QrCode, RefreshCw, Users } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useRestaurant } from "../../hooks/useRestaurant";
-import { useTableCheck } from "../../hooks/useTableCheck";
+import { useTableCheck, type TableCheckViewModel } from "../../hooks/useTableCheck";
 import { tableCheckUrl, generateTableCheckQRDataUrl, downloadTableCheckQR } from "../../utils/qr";
 import { Button } from "../../components/common/Button";
+import { ConfirmDialog } from "../../components/common/Modal";
 import { EmptyState } from "../../components/common/States";
 import { formatCurrency, formatTime } from "../../utils/formatting";
 import { formatWaitLabel } from "../../services/tableWaitTimeService";
+import {
+  canOwnerReleaseTable,
+  ownerReleaseReservation,
+  OwnerReleaseError,
+} from "../../services/tableCheckService";
 
 function formatCountdown(ms: number | null): string {
   if (ms == null) return "";
@@ -23,7 +29,10 @@ export default function OwnerTableCheck() {
   const { models, counts, loading, refresh } = useTableCheck(restaurantId);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [qrLoading, setQrLoading] = useState(false);
+  const [releaseTarget, setReleaseTarget] = useState<TableCheckViewModel | null>(null);
+  const [releasing, setReleasing] = useState(false);
   const url = restaurantId ? tableCheckUrl(restaurantId) : "";
+  const isOwner = profile?.role === "OWNER";
 
   useEffect(() => {
     if (!restaurantId) return;
@@ -170,18 +179,34 @@ export default function OwnerTableCheck() {
                   </p>
                 )}
                 {m.wait && (m.status === "OCCUPIED" || m.status === "PAYMENT_PENDING") && (
-                  <p className="text-xs text-gray-600 mt-1.5">
-                    Estimated remaining: {m.wait.label === "approx" && m.wait.remainingMinutes != null
-                      ? `~${m.wait.remainingMinutes} min`
-                      : formatWaitLabel(m.wait, "en")}
-                    <span className="text-gray-400"> ({m.wait.confidence.toLowerCase()} confidence)</span>
-                  </p>
+                  <div className="text-xs text-gray-600 mt-1.5 space-y-0.5">
+                    <p>
+                      Estimated remaining: {m.wait.label === "approx" && m.wait.remainingMinMinutes != null && m.wait.remainingMaxMinutes != null
+                        ? m.wait.remainingMinMinutes === m.wait.remainingMaxMinutes
+                          ? `~${m.wait.remainingMinMinutes} min`
+                          : `${m.wait.remainingMinMinutes}–${m.wait.remainingMaxMinutes} min`
+                        : formatWaitLabel(m.wait, "en")}
+                    </p>
+                    <p className="text-gray-500">
+                      Order preparation estimate: {m.wait.preparationMinMinutes}–{m.wait.preparationMaxMinutes} min
+                    </p>
+                    <p className="text-gray-400">Confidence: {m.wait.confidence === "HIGH" ? "High" : m.wait.confidence === "MEDIUM" ? "Medium" : "Low"}</p>
+                  </div>
                 )}
                 {m.status === "RESERVED" && (
                   <p className="text-xs text-blue-700 mt-1.5 font-medium">
                     {m.ownReservation ? "Reserved by this session" : "Reserved — selection in progress"}
-                    {m.reservationExpiresInMs != null ? ` • expires in ${formatCountdown(m.reservationExpiresInMs)}` : ""}
+                    {m.reservationExpiresInMs != null ? ` • Expires in ${formatCountdown(m.reservationExpiresInMs)}` : ""}
                   </p>
+                )}
+                {isOwner && canOwnerReleaseTable(m.status) && (
+                  <Button
+                    variant="secondary"
+                    className="w-full mt-2.5"
+                    onClick={() => setReleaseTarget(m)}
+                  >
+                    Mark Available
+                  </Button>
                 )}
                 {m.status === "AVAILABLE" && (
                   <p className="text-xs text-green-700 mt-1.5">Ready for walk-in selection</p>
@@ -191,6 +216,42 @@ export default function OwnerTableCheck() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={!!releaseTarget}
+        title={releaseTarget ? `Make Table ${releaseTarget.table.tableNumber} available?` : ""}
+        message="This will cancel the current table reservation. It will not cancel or modify an active order."
+        confirmLabel={releasing ? "Releasing…" : "Make Available"}
+        onConfirm={async () => {
+          if (!releaseTarget || releasing) return;
+          setReleasing(true);
+          try {
+            const result = await ownerReleaseReservation(
+              restaurantId,
+              releaseTarget.table.id,
+              isOwner
+            );
+            toast.success(
+              result === "released"
+                ? `Table ${releaseTarget.table.tableNumber} is now available`
+                : `Table ${releaseTarget.table.tableNumber} is already available`
+            );
+            setReleaseTarget(null);
+          } catch (e) {
+            const err = e as OwnerReleaseError;
+            if (err?.code === "ACTIVE_ORDER") {
+              toast.error("Table has an active order and cannot be force-released.");
+            } else if (err?.code === "NOT_OWNER") {
+              toast.error("Only the restaurant owner can release tables.");
+            } else {
+              toast.error("Failed to release the table.");
+            }
+          } finally {
+            setReleasing(false);
+          }
+        }}
+        onCancel={() => !releasing && setReleaseTarget(null)}
+      />
     </div>
   );
 }

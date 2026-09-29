@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -319,4 +320,103 @@ export async function reserveTableAtomic(
     tx.set(resRef, reservation);
     return reservation;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Owner manual release: RESERVED → AVAILABLE.
+// ---------------------------------------------------------------------------
+
+export type OwnerReleaseResult = "released" | "already-available";
+
+export class OwnerReleaseError extends Error {
+  code: "NOT_OWNER" | "ACTIVE_ORDER";
+  constructor(code: OwnerReleaseError["code"], message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/**
+ * UI gate: the Mark Available action is offered ONLY for RESERVED tables.
+ * OCCUPIED / PAYMENT_PENDING must follow order → served/payment/cancelled →
+ * release; AVAILABLE needs nothing.
+ */
+export function canOwnerReleaseTable(status: TableCheckStatus): boolean {
+  return status === "RESERVED";
+}
+
+function isLiveOrderData(o: { status?: unknown; paymentStatus?: unknown }): boolean {
+  return (
+    o.status === "PLACED" ||
+    o.status === "PREPARING" ||
+    o.status === "READY" ||
+    (o.status === "SERVED" && o.paymentStatus !== "PAID")
+  );
+}
+
+/**
+ * Owner-only cancellation of a table reservation.
+ *
+ * - Verifies owner authorization (callers pass the authenticated profile
+ *   check; Firestore rules independently require isOwnerOf for deletes, so
+ *   customers can never delete — not even their own — via this path).
+ * - Re-reads table + claim order + reservation; refuses when a LIVE order
+ *   exists (active-order and payment-pending protection: never touches
+ *   occupiedBy/currentOrderId/order/payment state).
+ * - Expired/missing reservations already read AVAILABLE through the derived
+ *   status system; an expired doc is cleaned up and reported as
+ *   already-available.
+ */
+export async function ownerReleaseReservation(
+  restaurantId: string,
+  tableId: string,
+  isOwner: boolean
+): Promise<OwnerReleaseResult> {
+  if (!isOwner) {
+    throw new OwnerReleaseError("NOT_OWNER", "Only the restaurant owner can release tables.");
+  }
+  const tableRef = doc(db, "restaurants", restaurantId, "tables", tableId);
+  const resRef = doc(reservationsCol(restaurantId), tableId);
+  const now = Date.now();
+
+  const tableSnap = await getDoc(tableRef);
+  if (tableSnap.exists()) {
+    const t = tableSnap.data() as { currentOrderId?: unknown };
+    if (typeof t.currentOrderId === "string" && t.currentOrderId.length > 0) {
+      try {
+        const orderSnap = await getDoc(
+          doc(db, "restaurants", restaurantId, "orders", t.currentOrderId)
+        );
+        if (orderSnap.exists() && isLiveOrderData(orderSnap.data())) {
+          throw new OwnerReleaseError(
+            "ACTIVE_ORDER",
+            "This table has an active order and cannot be force-released."
+          );
+        }
+      } catch (e) {
+        if (e instanceof OwnerReleaseError) throw e;
+        // Unverifiable claim: fail closed, same as the order flow.
+        throw new OwnerReleaseError(
+          "ACTIVE_ORDER",
+          "This table has an active order and cannot be force-released."
+        );
+      }
+    }
+  }
+
+  const resSnap = await getDoc(resRef);
+  if (!resSnap.exists()) return "already-available";
+  const existing = resSnap.data() as TableReservation;
+  if (!isReservationLive(existing, now)) {
+    try {
+      await deleteDoc(resRef);
+    } catch {
+      // already-availalbe either way; cleanup is best-effort
+    }
+    return "already-available";
+  }
+  // Owner delete is authorized by Firestore rules (isOwnerOf); customers
+  // have no delete permission on tableReservations.
+  await deleteDoc(resRef);
+  return "released";
 }

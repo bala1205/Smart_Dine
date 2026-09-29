@@ -1,33 +1,35 @@
 import type { OrderStatus } from "../types/order";
+import { lookupPrepRange } from "./foodPrepTimes";
 
 /**
  * Grounded table wait-time estimation for SmartDine Table Check.
  *
  * Deterministic — NO AI, NO randomness. Every number derives from real
- * Firestore state (order status/timestamps, ordered items with quantities,
- * real `MenuItem.preparationTime`). Firestore/order state is authoritative;
- * an optional AI layer may only rephrase, never produce the numeric estimate.
+ * Firestore state (order status/timestamps, ordered items with quantities)
+ * plus the food preparation-time reference (min/max ranges per dish).
+ * Firestore/order state is authoritative; an optional AI layer may only
+ * rephrase, never produce the numeric estimate.
  *
- * Model (transparent heuristic, operational estimation only — no claims about
- * how fast people eat):
+ * Preparation model (explicit business rule — ADDITIVE, not parallel):
+ *   prepMin = Σ quantity × rangeMin,  prepMax = Σ quantity × rangeMax
+ * Quantity multiplies time; multiple items add. Ranges stay intact until
+ * display so customers see "Approx. 20–30 min" instead of false precision.
  *
- *   remaining = prepRemaining(status) + diningRemaining
+ * Status model (preparation range is only PART of occupancy):
+ * - PLACED     → full prep range + dining estimate
+ * - PREPARING  → remaining prep (range − elapsed since preparingAt) + dining
+ * - READY      → small serve buffer + dining estimate
+ * - SERVED (unpaid) → prep is done: dining remaining only; UI headline is
+ *                "Finishing payment" per spec
+ * - CANCELLED / PAID / none → null (table reads available via release logic)
  *
- * - PLACED     → full prep estimate + full dining estimate
- * - PREPARING  → remaining prep (prepEstimate − elapsed since preparingAt)
- *                + full dining estimate
- * - READY      → serve buffer + full dining estimate
- * - SERVED (unpaid) → dining remaining (diningEstimate − elapsed since
- *                servedAt); UI shows "Finishing payment" per spec
- * - CANCELLED / PAID / none → null (table is / will be available)
+ * Prep source priority per item: food reference range (by normalized name) →
+ * real MenuItem.preparationTime (point) → category default (point) →
+ * restaurant default (point). Non-reference sources are recorded in `basis`
+ * and lower confidence.
  *
- * Prep estimate: max(real item preparationTime) + small per-item overhead
- * (kitchen parallelizes, so max — not sum). Missing/zero prepTime falls back
- * to category defaults, then a single restaurant-level default. Fallback use
- * is recorded in `basis` and lowers confidence.
- *
- * Dining estimate: base + adjustments for party-size proxies (item count,
- * desserts/drinks). All values are named constants below.
+ * Dining stays a separate deterministic heuristic (point estimate, reported
+ * as both diningMin/Max). Food prep times are NOT eating times.
  */
 
 export type WaitConfidence = "HIGH" | "MEDIUM" | "LOW";
@@ -38,6 +40,8 @@ export interface WaitTimeItem {
   /** Real category name (for category-default fallback + dining tweaks). */
   categoryName: string;
   quantity: number;
+  /** Real menu/order item name (for food-reference range lookup). */
+  name?: string;
 }
 
 export interface WaitTimeInput {
@@ -52,8 +56,14 @@ export interface WaitTimeInput {
 }
 
 export interface WaitEstimate {
-  /** Rounded minutes, or null when the table should read available. */
+  /** Rounded midpoint (compat); prefer remainingMin/Max for display. */
   remainingMinutes: number | null;
+  remainingMinMinutes: number | null;
+  remainingMaxMinutes: number | null;
+  preparationMinMinutes: number;
+  preparationMaxMinutes: number;
+  diningMinMinutes: number;
+  diningMaxMinutes: number;
   /** Customer-safe label key (resolved by formatWaitLabel). */
   label: "approx" | "payment" | "unavailable";
   confidence: WaitConfidence;
@@ -61,25 +71,22 @@ export interface WaitEstimate {
   basis: string;
 }
 
-/** Short reservation/serve/payment buffers and dining heuristic. */
+/** Short serve/payment buffers and dining heuristic. */
 export const SERVE_BUFFER_MIN = 5;
 export const BASE_DINING_MIN = 25;
 export const EXTRA_ITEMS_THRESHOLD = 4;
 export const EXTRA_ITEMS_MIN = 5;
 export const DESSERT_DRINK_MIN = 5;
 export const MAX_DINING_MIN = 60;
-export const PER_EXTRA_ITEM_PREP_MIN = 2;
-export const MAX_PREP_MIN = 60;
-/** Used when an item has no real preparationTime and no category default. */
+/** Used when an item has no reference match, prep minutes, or category default. */
 export const RESTAURANT_DEFAULT_PREP_MIN = 15;
 export const MIN_REMAINING_MIN = 5;
 export const MAX_REMAINING_MIN = 90;
 export const ROUND_TO_MIN = 5;
 
 /**
- * Category-based prep fallbacks. Deliberately coarse (categories, never
- * per-dish times for the whole menu). Keys match case-insensitively against
- * the real category name; first match wins.
+ * Category-based prep fallbacks (point values). Deliberately coarse —
+ * only for foods missing from the reference AND without real prep minutes.
  */
 export const CATEGORY_PREP_DEFAULTS: Array<{ match: string[]; minutes: number }> = [
   { match: ["biriyani", "biryani"], minutes: 25 },
@@ -89,7 +96,7 @@ export const CATEGORY_PREP_DEFAULTS: Array<{ match: string[]; minutes: number }>
   { match: ["chinese", "noodle", "fried rice", "hakka", "manchurian"], minutes: 15 },
   { match: ["burger", "sandwich", "roll", "wrap"], minutes: 12 },
   { match: ["dosa", "idli", "vada", "breakfast", "upma", "poori"], minutes: 10 },
-  { match: ["parotta", "chapati", "naan", "bread"], minutes: 10 },
+  { match: ["parotta", "chapati", "naan", "bread", "roti"], minutes: 10 },
   { match: ["soup", "salad", "rasam"], minutes: 10 },
   { match: ["dessert", "cake", "ice cream", "pastry", "brownie", "halwa", "payasam", "jamun"], minutes: 8 },
   { match: ["juice", "coffee", "tea", "drink", "shake", "mojito", "soda", "mocktail", "lassi"], minutes: 5 },
@@ -103,26 +110,48 @@ export function categoryPrepDefault(categoryName: string): number | null {
   return null;
 }
 
-function effectivePrepMinutes(item: WaitTimeItem): { minutes: number; real: boolean } {
+type ItemSource = "food-range" | "menu-minutes" | "category" | "default";
+
+function prepRangeForItem(item: WaitTimeItem): { min: number; max: number; source: ItemSource } {
+  if (item.name) {
+    const ref = lookupPrepRange(item.name);
+    if (ref) return { min: ref.min, max: ref.max, source: "food-range" };
+  }
   const real = Number(item.preparationTime);
-  if (Number.isFinite(real) && real > 0) return { minutes: real, real: true };
+  if (Number.isFinite(real) && real > 0) {
+    return { min: real, max: real, source: "menu-minutes" };
+  }
   const cat = categoryPrepDefault(item.categoryName);
-  if (cat != null) return { minutes: cat, real: false };
-  return { minutes: RESTAURANT_DEFAULT_PREP_MIN, real: false };
+  if (cat != null) return { min: cat, max: cat, source: "category" };
+  return { min: RESTAURANT_DEFAULT_PREP_MIN, max: RESTAURANT_DEFAULT_PREP_MIN, source: "default" };
 }
 
-function prepEstimateMinutes(items: WaitTimeItem[]): { minutes: number; allReal: boolean } {
+export interface PrepRangeEstimate {
+  min: number;
+  max: number;
+  /** True when every item used a reference range or real prep minutes. */
+  allKnown: boolean;
+}
+
+/**
+ * Additive preparation range for an order: Σ quantity × [min, max].
+ * Pure — exact spec examples: 2×Egg Biriyani = 36–50; +Samosa = 41–58.
+ */
+export function preparationRangeForOrder(items: WaitTimeItem[]): PrepRangeEstimate {
   if (items.length === 0) {
-    return { minutes: RESTAURANT_DEFAULT_PREP_MIN, allReal: false };
+    return { min: RESTAURANT_DEFAULT_PREP_MIN, max: RESTAURANT_DEFAULT_PREP_MIN, allKnown: false };
   }
-  const eff = items.map(effectivePrepMinutes);
-  const max = Math.max(...eff.map((e) => e.minutes));
-  const total =
-    max + PER_EXTRA_ITEM_PREP_MIN * Math.max(0, eff.length - 1);
-  return {
-    minutes: Math.min(MAX_PREP_MIN, total),
-    allReal: eff.every((e) => e.real),
-  };
+  let min = 0;
+  let max = 0;
+  let allKnown = true;
+  for (const item of items) {
+    const qty = Math.max(0, Math.floor(Number(item.quantity)) || 0);
+    const r = prepRangeForItem(item);
+    min += qty * r.min;
+    max += qty * r.max;
+    if (r.source !== "food-range" && r.source !== "menu-minutes") allKnown = false;
+  }
+  return { min, max, allKnown };
 }
 
 function diningEstimateMinutes(items: WaitTimeItem[]): number {
@@ -156,37 +185,63 @@ export function estimateTableWait(
   if (input.status === "CANCELLED") return null;
   if (input.paymentStatus === "PAID") return null;
 
-  const prep = prepEstimateMinutes(input.items);
+  const prep = preparationRangeForOrder(input.items);
   const dining = diningEstimateMinutes(input.items);
   const elapsedSince = (ts?: number) =>
     typeof ts === "number" && Number.isFinite(ts) && ts > 0 && ts <= now ? now - ts : 0;
   const mins = (ms: number) => ms / 60000;
+  const confidence: WaitConfidence = prep.allKnown ? "MEDIUM" : "LOW";
 
   switch (input.status) {
     case "PLACED": {
-      const remaining = prep.minutes + dining;
+      const lo = prep.min + dining;
+      const hi = prep.max + dining;
+      const rMin = roundWait(lo);
+      const rMax = roundWait(hi);
       return {
-        remainingMinutes: roundWait(remaining),
+        remainingMinutes: roundWait((lo + hi) / 2),
+        remainingMinMinutes: rMin,
+        remainingMaxMinutes: rMax,
+        preparationMinMinutes: prep.min,
+        preparationMaxMinutes: prep.max,
+        diningMinMinutes: dining,
+        diningMaxMinutes: dining,
         label: "approx",
-        confidence: prep.allReal ? "MEDIUM" : "LOW",
-        basis: prep.allReal ? "placed-full" : "placed-full-fallback-prep",
+        confidence,
+        basis: prep.allKnown ? "placed-full" : "placed-full-fallback-prep",
       };
     }
     case "PREPARING": {
       const anchor = input.preparingAt && input.preparingAt > 0 ? input.preparingAt : input.createdAt;
-      const prepRemaining = Math.max(0, prep.minutes - mins(elapsedSince(anchor)));
-      const remaining = prepRemaining + dining;
+      const elapsed = mins(elapsedSince(anchor));
+      const lo = Math.max(0, prep.min - elapsed) + dining;
+      const hi = Math.max(0, prep.max - elapsed) + dining;
+      const rMin = roundWait(lo);
+      const rMax = roundWait(hi);
       return {
-        remainingMinutes: roundWait(remaining),
+        remainingMinutes: roundWait((lo + hi) / 2),
+        remainingMinMinutes: rMin,
+        remainingMaxMinutes: rMax,
+        preparationMinMinutes: Math.max(0, prep.min - elapsed),
+        preparationMaxMinutes: Math.max(0, prep.max - elapsed),
+        diningMinMinutes: dining,
+        diningMaxMinutes: dining,
         label: "approx",
-        confidence: prep.allReal ? "MEDIUM" : "LOW",
+        confidence,
         basis: "preparing-partial",
       };
     }
     case "READY": {
-      const remaining = SERVE_BUFFER_MIN + dining;
+      const lo = SERVE_BUFFER_MIN + dining;
+      const rMin = roundWait(lo);
       return {
-        remainingMinutes: roundWait(remaining),
+        remainingMinutes: rMin,
+        remainingMinMinutes: rMin,
+        remainingMaxMinutes: rMin,
+        preparationMinMinutes: 0,
+        preparationMaxMinutes: 0,
+        diningMinMinutes: dining,
+        diningMaxMinutes: dining,
         label: "approx",
         confidence: "MEDIUM",
         basis: "ready-buffer",
@@ -199,13 +254,26 @@ export function estimateTableWait(
       if (diningRemaining <= 0) {
         return {
           remainingMinutes: null,
+          remainingMinMinutes: null,
+          remainingMaxMinutes: null,
+          preparationMinMinutes: 0,
+          preparationMaxMinutes: 0,
+          diningMinMinutes: dining,
+          diningMaxMinutes: dining,
           label: "payment",
           confidence: "LOW",
           basis: "payment-pending",
         };
       }
+      const r = roundWait(diningRemaining);
       return {
-        remainingMinutes: roundWait(diningRemaining),
+        remainingMinutes: r,
+        remainingMinMinutes: r,
+        remainingMaxMinutes: r,
+        preparationMinMinutes: 0,
+        preparationMaxMinutes: 0,
+        diningMinMinutes: dining,
+        diningMaxMinutes: dining,
         label: "payment",
         confidence: "LOW",
         basis: "payment-pending",
@@ -226,13 +294,23 @@ export function formatWaitLabel(
     if (lang === "tanglish") return "Payment mudikuraanga";
     return "Finishing payment";
   }
-  if (est.label === "unavailable" || est.remainingMinutes == null) {
+  if (
+    est.label === "unavailable" ||
+    est.remainingMinMinutes == null ||
+    est.remainingMaxMinutes == null
+  ) {
     if (lang === "ta") return "ஆக்கிரமிக்கப்பட்டுள்ளது — காத்திருப்பு நேரம் தெரியவில்லை";
     if (lang === "tanglish") return "Occupied — wait time theriyala";
     return "Occupied — wait time unavailable";
   }
-  const n = est.remainingMinutes;
-  if (lang === "ta") return `தோராயமாக ${n} நிமிடங்கள்`;
-  if (lang === "tanglish") return `Approx. ${n} min remaining`;
-  return `Approx. ${n} min remaining`;
+  const lo = est.remainingMinMinutes;
+  const hi = est.remainingMaxMinutes;
+  if (lo === hi) {
+    if (lang === "ta") return `தோராயமாக ${lo} நிமிடங்கள்`;
+    if (lang === "tanglish") return `Approx. ${lo} min remaining`;
+    return `Approx. ${lo} min remaining`;
+  }
+  if (lang === "ta") return `தோராயமாக ${lo}–${hi} நிமிடங்கள்`;
+  if (lang === "tanglish") return `Approx. ${lo}–${hi} min remaining`;
+  return `Approx. ${lo}–${hi} min remaining`;
 }
