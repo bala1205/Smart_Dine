@@ -282,6 +282,27 @@ const TAMIL_STOP_WORDS = new Set([
   "enakku", "enaku", "enak", "enukku", "please", "kodunga",
 ]);
 
+/**
+ * Question/conversation words that must NEVER become kitchen notes
+ * ("epdi" means "how is it", not a modification). Filtered from notes only —
+ * matching logic is untouched so the 88-dish matrix stays intact.
+ * Exported for chat intent sanitization reuse.
+ */
+export const QUESTION_NOTE_EXCLUDE = new Set([
+  "ena", "enna", "epdi", "eppadi", "pathi", "patti", "sollu", "sollunga",
+  "slu", "sol", "solu", "details", "detail", "iruka", "iruku", "irukku",
+  "kedaikuma", "kidaikuma", "available", "evlo", "evalo", "evalavu",
+  "price", "suggest", "suggestion", "recommend", "recommendation",
+  "kaatu", "kaattu", "kattu", "kaatunga", "kaattunga",
+  "entha", "ethana", "etha", "edhu", "enga", "eppo", "epo", "peru",
+  "tell", "me", "about", "what", "which", "how", "much",
+  "cheap", "cheapest", "costly", "costliest", "best", "vilai",
+  "describe", "explain", "info",
+  "பற்றி", "பத்தி", "எப்படி", "எவ்வளவு", "விலை", "இருக்கிறது",
+  "இருக்கிறதா", "இருக்கு", "இருக்கா", "கிடைக்குமா", "காட்டு",
+  "சொல்லுங்கள்", "சொல்லு", "விவரம்", "என்ன",
+]);
+
 // Unit words ("two plates", "rendu plate", "இரண்டு பிளேட்") — quantities are
 // parsed separately, so these are neither dishes nor kitchen notes.
 const PLATE_WORDS = new Set([
@@ -554,12 +575,14 @@ export function fallbackParseVoiceClient(transcript: string, menu: MenuItem[]): 
   // Leftover transcript words (not part of any dish/quantity match) become
   // customization notes for the cart instruction — e.g. "medium spicy" or
   // "no onion" in "2 chicken biriyani medium spicy, no onion".
+  // Question/conversation words ("epdi", "pathi", "evlo", ...) are NEVER notes.
   const notes = tokens
     .filter((t, idx) => {
       if (consumedIdx.has(idx)) return false;
       if (!t || t.length < 2) return false;
       if (TAMIL_STOP_WORDS.has(t)) return false;
       if (PLATE_WORDS.has(t)) return false;
+      if (QUESTION_NOTE_EXCLUDE.has(t)) return false;
       if (toNum(t) != null) return false;
       return true;
     })

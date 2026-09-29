@@ -15,7 +15,6 @@ import { PageLoader } from "../../components/common/Spinner";
 import { ErrorState, EmptyState } from "../../components/common/States";
 import ServiceRequestPanel from "../../components/customer/ServiceRequestPanel";
 import { VoiceOrder } from "../../components/customer/VoiceOrder";
-import { NaturalLanguageOrder } from "../../components/customer/NaturalLanguageOrder";
 import { AdaptivePrefsStrip } from "../../components/customer/AdaptivePrefsStrip";
 import { SmartDineAIChat } from "../../components/customer/SmartDineAIChat";
 import { ListenAnnouncer } from "../../components/customer/ListenAnnouncer";
@@ -327,13 +326,12 @@ export default function CustomerMenu() {
         </section>
       )}
 
-      {/* AI-assisted ordering — voice + natural language, mobile-first, accessible */}
-      <section aria-label="Voice and text ordering" id="sd-voice" className="max-w-lg mx-auto px-4 py-3 space-y-4 scroll-mt-2">
+      {/* Voice ordering — floating SmartDine AI Chat replaces the old Ask card */}
+      <section aria-label="Voice ordering" id="sd-voice" className="max-w-lg mx-auto px-4 py-3 space-y-4 scroll-mt-2">
         <div className="sr-only" aria-live="polite">
-          SmartDine AI ordering available: voice and text
+          SmartDine voice ordering available
         </div>
         <VoiceOrder restaurantId={restaurantId} menu={items} />
-        <NaturalLanguageOrder restaurantId={restaurantId} menu={items} categories={categories} />
       </section>
 
       <SmartDineAIChat

@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Hand, Mic, Volume2, Type, Contrast, Languages, X, SlidersHorizontal } from "lucide-react";
+import { Hand, Mic, Volume2, Type, Contrast, X, SlidersHorizontal } from "lucide-react";
 import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
-import type { AdaptiveLanguage } from "../../context/AdaptivePrefsContext";
 
 const DISMISS_KEY = "smartdine_adaptive_strip_dismissed";
 
@@ -181,31 +180,6 @@ export function AdaptivePrefsStrip({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 mt-3" role="group" aria-label="Language">
-          <Languages className="w-4 h-4 text-ink-400 shrink-0" aria-hidden="true" />
-          {(
-            [
-              { code: "en", label: "English" },
-              { code: "tanglish", label: "Tanglish" },
-              { code: "ta", label: "தமிழ்" },
-            ] as Array<{ code: AdaptiveLanguage; label: string }>
-          ).map((opt) => (
-            <button
-              key={opt.code}
-              type="button"
-              onClick={() => choose({ language: opt.code })}
-              aria-pressed={prefs.language === opt.code}
-              aria-label={`Order in ${opt.label}`}
-              className={`pressable px-3 py-1.5 min-h-[34px] rounded-full text-xs font-semibold border transition-colors ${
-                prefs.language === opt.code
-                  ? "bg-brand-600 border-brand-600 text-white"
-                  : "bg-white border-surface-200 text-ink-600"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
       </section>
     </div>
   );

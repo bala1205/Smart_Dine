@@ -37,19 +37,24 @@ function transliterateTamilForNatural(s: string): string {
 // order-intent path handle it.
 // ---------------------------------------------------------------------------
 
-const LISTING_TRIGGERS = ["what", "which", "list", "show", "options", "menu", "have", "enna", "kaatu", "kaattu", "kattu", "காட்டு"];
+const LISTING_TRIGGERS = ["what", "which", "list", "show", "options", "menu", "have", "enna", "ena", "iruku", "iruka", "irukku", "kaatu", "kaattu", "kattu", "காட்டு"];
 const ORDER_TRIGGERS = ["give", "kudu", "order", "venum", "vendum", "pannu", "pannunga", "add", "want", "get", "bring"];
 const QUESTION_FILLER = new Set([
   "what", "which", "list", "show", "me", "the", "a", "an", "do", "does", "you", "your",
   "have", "has", "got", "is", "are", "there", "here", "any", "many", "much", "price",
-  "cost", "rate", "how", "of", "for", "in", "on", "my", "enna", "irukku", "iruku", "iruka",
-  "kidaikuma", "evlo", "evalavu", "please",
+  "cost", "rate", "how", "of", "for", "in", "on", "my", "enna", "ena", "irukku", "iruku", "iruka",
+  "kidaikuma", "kedaikuma", "evlo", "evalavu", "evalo", "please",
+  "tell", "about", "details", "detail", "sollu", "sollunga", "slu", "pathi", "patti",
+  "epdi", "eppadi",
   "available", "availability", "stock", "cheapest", "cheap", "options", "option", "menu",
   "items", "item", "dishes", "dish", "food", "things",
   // Tanglish/Tamil question particles and locatives (never dish words).
   "ah", "aa", "aah", "la", "lae", "illa",
   "kaatu", "kaattu", "kattu", "kaatunga", "kaattunga",
+  "kuraintha", "malivana", "ethana", "entha",
   "இருக்கு", "இருக்கா", "எவ்வளவு", "விலை", "கிடைக்குமா", "காட்டு", "காட்டுங்கள்",
+  "பற்றி", "எப்படி", "சொல்லுங்கள்", "விவரம்", "என்ன",
+  "குறைந்த", "மலிவான", "அதிக", "எது", "எத்தனை",
 ]);
 
 function questionRemainder(query: string): string {
@@ -73,19 +78,23 @@ function isAvailableStockAware(m: MenuItem): boolean {
 
 /** Generic scopes resolve against real category/item words — never invented. */
 export function scopeHit(scope: string, hay: string): boolean {
-  const s = scope.trim();
+  // Canonicalize biriyani/biryani spelling (Tanglish + Tamil transliteration
+  // "பிரியாணி" → "biryani" must hit menu "Biriyani").
+  const canon = (x: string) => x.replace(/biriyani/g, "biryani");
+  const s = canon(scope.trim());
   if (s.length < 3) return false;
   const sing = s.endsWith("s") && s.length > 3 ? s.slice(0, -1) : s;
-  if (hay.includes(s) || hay.includes(sing)) return true;
+  const h = canon(hay);
+  if (h.includes(s) || h.includes(sing)) return true;
   // "drinks"/"desserts"/"seafood" style generics: match real category/item keywords.
   if (sing === "drink" || sing === "beverage") {
-    return DRINK_KEYS.some((k) => hay.includes(k));
+    return DRINK_KEYS.some((k) => h.includes(k));
   }
   if (sing === "dessert" || sing === "sweet") {
-    return DESSERT_KEYS.some((k) => hay.includes(k));
+    return DESSERT_KEYS.some((k) => h.includes(k));
   }
   if (sing === "seafood" || sing === "sea food" || sing === "fish") {
-    return SEAFOOD_KEYS.some((k) => hay.includes(k));
+    return SEAFOOD_KEYS.some((k) => h.includes(k));
   }
   return false;
 }

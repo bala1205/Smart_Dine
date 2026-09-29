@@ -10,6 +10,15 @@ import {
 } from "./aiMenuMatcher";
 import { answerMenuQuestion, scopeFilter, scopeHit, type AnswerLang } from "./naturalLanguageOrderService";
 import { formatCurrency } from "../utils/formatting";
+import {
+  classifyChatIntent,
+  hasDishSignal as intentHasDishSignal,
+  hasRestaurantMention,
+  isExplicitOrderIntent,
+  hasQuantitySignal,
+  hasQuestionSignal,
+  sanitizeKitchenNotes,
+} from "./chatIntent";
 
 export type ChatLanguage = AnswerLang;
 
@@ -200,8 +209,16 @@ export function extractPriceRange(text: string): { min: number; max: number } | 
 
 const DETAIL_FILLER = new Set([
   "tell", "me", "about", "details", "detail", "describe", "explain", "info", "sollu", "sollunga",
+  "slu", "sol", "solu", "pathi", "patti", "epdi", "eppadi",
   "the", "a", "an", "this", "that", "food", "item", "dish", "please", "konjam", "enna", "ena",
-  "விவரம்", "சொல்லுங்கள்", "பற்றி", "என்ன",
+  "enakku", "enaku", "evlo", "evalo", "evalavu", "iruku", "iruka", "irukku",
+  "kedaikuma", "kidaikuma", "available", "kaatu", "kaattu", "kattu",
+  "cheapest", "cheap", "costly", "best", "suggest", "recommend",
+  "kuraintha", "malivana", "ethana", "entha",
+  "what", "which", "how", "much", "is", "are", "do", "does", "you", "have",
+  "விவரம்", "சொல்லுங்கள்", "சொல்லு", "பற்றி", "பத்தி", "என்ன", "எப்படி",
+  "எவ்வளவு", "விலை", "இருக்கு", "இருக்கா", "கிடைக்குமா", "காட்டு",
+  "குறைந்த", "மலிவான", "அதிக", "எது", "எத்தனை",
 ]);
 
 /** Scope remainder for count/range/cheap queries (dish/category words only). */
@@ -212,7 +229,7 @@ export function remainderScope(rawText: string): string {
       (t) =>
         t.length > 2 &&
         !DETAIL_FILLER.has(t) &&
-        !/^(how|many|much|cheapest|cheap|most|expensive|costliest|costly|under|below|less|between|ethana|kuraintha|malivana|show|list|enna|iruku|iruka|kulla|keela|varaikum|to|from|muthal|lendhu|and|what|which|kaatu|kaattu|kattu|is|the|are|do|does|you|your|a|an|that|this|it|of|in|on|for|my|dhaan|thaan)$/.test(t) &&
+        !/^(how|many|much|cheapest|cheap|most|expensive|costliest|costly|under|below|less|between|ethana|etha|entha|kuraintha|malivana|show|list|enna|ena|epdi|eppadi|pathi|patti|sollu|sollunga|slu|evlo|evalo|evalavu|iruku|iruka|irukku|kulla|keela|kedaikuma|kidaikuma|available|varaikum|to|from|muthal|lendhu|and|what|which|tell|about|details?|kaatu|kaattu|kattu|is|the|are|do|does|you|your|a|an|that|this|it|of|in|on|for|my|dhaan|thaan)$/.test(t) &&
         /^[^0-9]*$/.test(t)
     )
     .join(" ");
@@ -492,12 +509,17 @@ export function answerChat(
   }
 
   // --- Restaurant identity / summary (real fields only) ---
-  const restaurantWord = hasWord("restaurant", "hotel", "kadai", "shop", "உணவக", "கடை", "restaurant peru", "hotel peru");
+  // Typo-tolerant ("Resturant pathi slu" → restaurant) + Tanglish/Tamil info verbs.
+  const restaurantWord = hasRestaurantMention(text) || hasWord("restaurant", "hotel", "kadai", "shop", "உணவக", "கடை", "restaurant peru", "hotel peru");
+  const restaurantInfoVerb =
+    hasWord("called", "peru", "பெயர்", "name", "about", "details", "detail", "tell", "sollu", "sollunga", "slu", "pathi", "patti", "epdi", "eppadi", "விவர", "details", "explain", "describe", "info") ||
+    /\bslu\b|\bpathi\b|\bpatti\b|\bepdi\b|\beppadi\b/.test(norm) ||
+    text.includes("பற்றி") || text.includes("விவரம்") || text.includes("சொல்லுங்கள்");
   if (
     hasWord("called", "peru", "பெயர்") ||
-    (restaurantWord && hasWord("name", "about", "details", "detail", "tell", "sollu", "விவர"))
+    (restaurantWord && restaurantInfoVerb)
   ) {
-    if (hasWord("about", "details", "detail", "tell", "sollu", "விவர")) {
+    if (restaurantInfoVerb || hasWord("about", "details", "detail", "tell", "sollu", "slu", "pathi", "patti", "epdi", "விவர")) {
       return { text: restaurantSummary(ctx, lang, menu) };
     }
     return {
@@ -584,6 +606,8 @@ export function answerChat(
   }
 
   // --- Food detail / category-of (real doc facts only) ---
+  // Conversation-first: "Egg biriyani epdi / pathi sollu / tell me about X"
+  // is INFORMATIONAL, never an order. Question words never become notes.
   {
     const detailHit = detailQueryItem(text, norm, menu);
     if (detailHit) {
@@ -601,13 +625,72 @@ export function answerChat(
           scopeLabel: detailHit.name,
         };
       }
-      if (hasWord("tell", "about", "details", "detail", "sollu", "விவரம்", "describe", "explain", "info")) {
+      if (
+        hasWord("tell", "about", "details", "detail", "sollu", "sollunga", "slu", "pathi", "patti", "epdi", "eppadi", "விவரம்", "describe", "explain", "info", "எப்படி", "பற்றி") ||
+        /\bslu\b|\bpathi\b|\bpatti\b|\bepdi\b|\beppadi\b/.test(norm) ||
+        text.includes("எப்படி") || text.includes("பற்றி")
+      ) {
         return {
           text: foodDetailText(detailHit, catNameOf(detailHit), lang),
           suggestions: [toSuggestion(detailHit, catNameOf(detailHit))],
           scopeIds: [detailHit.id],
           scopeLabel: detailHit.name,
         };
+      }
+      // "Is Egg Biriyani good?" — opinion framed as question: answer with real
+      // facts (price/availability/description), never invent taste ratings.
+      if (/\bgood\b|\btasty\b|\bnalla\b|நல்ல/.test(norm) && hasQuestionSignal(text) && !isExplicitOrderIntent(text)) {
+        return {
+          text: foodDetailText(detailHit, catNameOf(detailHit), lang),
+          suggestions: [toSuggestion(detailHit, catNameOf(detailHit))],
+          scopeIds: [detailHit.id],
+          scopeLabel: detailHit.name,
+        };
+      }
+    }
+    // "Tell me about that one" with exactly one safe referent.
+    if (
+      !detailHit && ctx.lastIds?.length === 1 &&
+      (/\bthat\b|\bthis\b|\bit\b/.test(norm) || text.includes("அது")) &&
+      (hasWord("tell", "about", "details", "detail", "sollu", "slu", "pathi", "epdi", "what", "which") || text.includes("பற்றி"))
+    ) {
+      const one = menu.find((m) => m.id === ctx.lastIds![0]);
+      if (one) {
+        return {
+          text: foodDetailText(one, catNameOf(one), lang),
+          suggestions: [toSuggestion(one, catNameOf(one))],
+          scopeIds: [one.id],
+          scopeLabel: one.name,
+        };
+      }
+    }
+    // Generic "Biriyani pathi slu" (no single dish): list real biriyani
+    // options as discovery — NEVER an ambiguous order. Only for explicit
+    // info phrasing (pathi/slu/epdi/about/tell); bare words ("biriyani")
+    // and numeric filters ("under 200") fall through to their own handlers.
+    const hasInfoPhrasing =
+      hasWord("tell", "about", "details", "detail", "sollu", "sollunga", "slu", "pathi", "patti", "epdi", "eppadi", "describe", "explain", "info", "எப்படி", "பற்றி", "விவரம்") ||
+      /\bslu\b|\bpathi\b|\bpatti\b|\bepdi\b|\beppadi\b/.test(norm) ||
+      text.includes("எப்படி") || text.includes("பற்றி");
+    if (!detailHit && !isExplicitOrderIntent(text) && hasInfoPhrasing) {
+      const scope = remainderScope(text);
+      if (scope) {
+        const cands = scopeFilter(scope, menu, catNameOf);
+        if (cands.length > 1) {
+          const shown = [...cands].sort((a, b) => priceOf(a) - priceOf(b)).slice(0, 5);
+          const list = cands.slice(0, 7).map((m) => `${m.name} at ${formatCurrency(priceOf(m))}`).join(", ");
+          return {
+            text:
+              lang === "ta"
+                ? `${scope} வகைகள்: ${list}.`
+                : lang === "tanglish"
+                  ? `${scope} options: ${list}.`
+                  : `${scope} options: ${list}.`,
+            suggestions: shown.map((m) => toSuggestion(m, catNameOf(m))),
+            scopeIds: cands.map((m) => m.id),
+            scopeLabel: scope,
+          };
+        }
       }
     }
   }
@@ -760,36 +843,120 @@ export function answerChat(
     }
   }
 
-  // --- Order intent (same matcher + resolver as Voice/Ask) ---
+  // --- Conversation-first discovery: "Biriyani ena iruku", "chicken items
+  // ena iruku", "dessert ena iruku" list REAL options — NEVER an ambiguous
+  // order, NEVER cart mutation. Ambiguity is only for ACTIONS (ordering).
   {
-    const fb = fallbackParseVoiceClient(text, menu);
-    const intent = resolveVoiceIntent(fb, menu);
-    if (intent.items.length > 0) {
-      const parts = intent.items
-        .map((it) => {
-          const m = menu.find((x) => x.id === it.menuItemId);
-          return m ? `${m.name} × ${it.quantity}, ${formatCurrency(priceOf(m) * it.quantity)}` : "";
-        })
-        .filter(Boolean);
-      const noteBit = intent.notes?.trim()
-        ? lang === "ta"
-          ? ` குறிப்பு: ${intent.notes.trim()}.`
-          : lang === "tanglish"
-            ? ` Note: ${intent.notes.trim()}.`
-            : ` Note: ${intent.notes.trim()}.`
-        : "";
-      return { text: `${parts.join("; ")}.${noteBit} ${S.confirmAsk}`, intent };
+    const kind = classifyChatIntent(text, menu, catNameOf, { lastIds: ctx.lastIds });
+    if (kind === "MENU_DISCOVERY" || kind === "CATEGORY_QUERY") {
+      const scope = remainderScope(text);
+      const cands = scope ? scopeFilter(scope, menu, catNameOf) : [...menu];
+      // Veg-only discovery stays meat-free via the safe veg check.
+      const vegOnly =
+        /\bveg\b|vegetarian|vegan|saiva|சைவ/.test(norm) &&
+        !/non veg|nonveg|non vegetarian/.test(norm);
+      let pool = cands.length > 0 ? cands : [...menu];
+      if (vegOnly) pool = pool.filter((m) => isVegSafe(m, catNameOf(m)));
+      if (pool.length > 0) {
+        const sorted = [...pool].sort(
+          (a, b) => Number(b.isAvailable === true) - Number(a.isAvailable === true) || priceOf(a) - priceOf(b)
+        );
+        const shown = sorted.slice(0, 5);
+        const label = scope || "menu";
+        const fullList = sorted
+          .slice(0, 10)
+          .map((m) => `${m.name} at ${formatCurrency(priceOf(m))}`)
+          .join(", ")
+          .slice(0, 500);
+        return {
+          text:
+            lang === "ta"
+              ? `${sorted.length} ${label} கிடைக்கிறது: ${fullList}.`
+              : lang === "tanglish"
+                ? `${sorted.length} ${label} iruku: ${fullList}.`
+                : `Found ${sorted.length} ${label} items: ${fullList}.`,
+          suggestions: shown.map((m) => toSuggestion(m, catNameOf(m))),
+          scopeIds: sorted.map((m) => m.id),
+          scopeLabel: label,
+        };
+      }
     }
-    if (intent.ambiguous && intent.ambiguous.length > 0) {
-      const amb = intent.ambiguous.slice(0, 2).map((a) => ({
-        query: a.query,
-        options: a.options.slice(0, 5).map((o) => {
-          const m = menu.find((x) => x.id === o.id);
-          return { id: o.id, name: o.name, price: m ? priceOf(m) : 0 };
-        }),
-      }));
-      const names = amb.flatMap((a) => a.options.map((o) => o.name)).slice(0, 5);
-      return { text: `${S.ambiguousAsk} ${names.join(", ")}.`, ambiguous: amb };
+    // --- Comparison: "X vs Y which is cheaper?" from REAL docs only.
+    if (kind === "COMPARISON") {
+      const compared = compareDishes(text, menu, catNameOf, lang);
+      if (compared) return compared;
+    }
+    // --- General restaurant conversation (greetings / help / how to order).
+    if (kind === "GENERAL_RESTAURANT_CONVERSATION") {
+      return { text: generalConversationText(text, lang, ctx) };
+    }
+  }
+
+  // --- Order intent: EXPLICIT ONLY (same matcher + resolver as Voice/Ask) ---
+  // A menu name alone never orders. Questions (epdi/pathi/evlo/ena iruku/…)
+  // never order. Only clear order language reaches the matcher.
+  {
+    const kind = classifyChatIntent(text, menu, catNameOf, { lastIds: ctx.lastIds });
+    // "add that / add it" with exactly one referent is an explicit order for it.
+    if (
+      ctx.lastIds?.length === 1 &&
+      /\badd\b|\bkudu\b|venum|vendum|சேர்க்கவும்|வேண்டும்/.test(norm) &&
+      (/\bthat\b|\bthis\b|\bit\b/.test(norm) || text.includes("அது"))
+    ) {
+      const one = menu.find((m) => m.id === ctx.lastIds![0]);
+      if (one && isAvailableItem(one)) {
+        const qtyMatch = text.match(/\b(\d{1,2})\b/);
+        const qty = qtyMatch ? Math.max(1, Math.min(20, parseInt(qtyMatch[1], 10))) : 1;
+        const intent: OrderIntent = {
+          items: [{ menuItemId: one.id, quantity: qty, name: one.name, price: priceOf(one), available: true }],
+          notes: "",
+        };
+        return {
+          text: `${one.name} × ${qty}, ${formatCurrency(priceOf(one) * qty)}. ${S.confirmAsk}`,
+          intent,
+        };
+      }
+    }
+    const dishSignal = intentHasDishSignal(text, menu, catNameOf);
+    const quantityOrderWithoutQuestion =
+      hasQuantitySignal(text) && dishSignal && !hasQuestionSignal(text);
+    const mayOrder = kind === "ORDER_INTENT" || quantityOrderWithoutQuestion;
+    if (!mayOrder) {
+      // Not an order — fall through to follow-ups / recommendations / fallback.
+      // Intentionally skip the matcher so questions never create previews.
+    } else {
+      const fb = fallbackParseVoiceClient(text, menu);
+      const intent = resolveVoiceIntent(fb, menu);
+      // Sanitize: question words must NEVER survive as kitchen notes.
+      intent.notes = sanitizeKitchenNotes(intent.notes || "");
+      if (intent.items.length > 0) {
+        const parts = intent.items
+          .map((it) => {
+            const m = menu.find((x) => x.id === it.menuItemId);
+            return m ? `${m.name} × ${it.quantity}, ${formatCurrency(priceOf(m) * it.quantity)}` : "";
+          })
+          .filter(Boolean);
+        const cleanNotes = (intent.notes || "").trim();
+        const noteBit = cleanNotes
+          ? lang === "ta"
+            ? ` குறிப்பு: ${cleanNotes}.`
+            : lang === "tanglish"
+              ? ` Note: ${cleanNotes}.`
+              : ` Note: ${cleanNotes}.`
+          : "";
+        return { text: `${parts.join("; ")}.${noteBit} ${S.confirmAsk}`, intent };
+      }
+      if (intent.ambiguous && intent.ambiguous.length > 0) {
+        const amb = intent.ambiguous.slice(0, 2).map((a) => ({
+          query: a.query,
+          options: a.options.slice(0, 5).map((o) => {
+            const m = menu.find((x) => x.id === o.id);
+            return { id: o.id, name: o.name, price: m ? priceOf(m) : 0 };
+          }),
+        }));
+        const names = amb.flatMap((a) => a.options.map((o) => o.name)).slice(0, 5);
+        return { text: `${S.ambiguousAsk} ${names.join(", ")}.`, ambiguous: amb };
+      }
     }
   }
 
@@ -828,6 +995,46 @@ export function answerChat(
   {
     const rec = recommend(text, menu, catNameOf, lang);
     if (rec) return rec;
+  }
+
+  // --- Bare dish word without question/order verbs: preserve legacy
+  // "Did you mean …?" for genuinely ambiguous generics ("biriyani" alone).
+  // Question-bearing generics ("Biriyani ena iruku") are already handled as
+  // MENU_DISCOVERY above and never reach here.
+  {
+    const dishSignal = intentHasDishSignal(text, menu, catNameOf);
+    if (dishSignal && !hasQuestionSignal(text) && !isExplicitOrderIntent(text) && !hasQuantitySignal(text)) {
+      const fb = fallbackParseVoiceClient(text, menu);
+      const intent = resolveVoiceIntent(fb, menu);
+      if (intent.ambiguous && intent.ambiguous.length > 0) {
+        const amb = intent.ambiguous.slice(0, 2).map((a) => ({
+          query: a.query,
+          options: a.options.slice(0, 5).map((o) => {
+            const mm = menu.find((x) => x.id === o.id);
+            return { id: o.id, name: o.name, price: mm ? priceOf(mm) : 0 };
+          }),
+        }));
+        const names = amb.flatMap((a) => a.options.map((o) => o.name)).slice(0, 5);
+        return { text: `${S.ambiguousAsk} ${names.join(", ")}.`, ambiguous: amb };
+      }
+      if (intent.items.length === 1) {
+        const it = intent.items[0];
+        const mm = menu.find((x) => x.id === it.menuItemId);
+        if (mm) {
+          return {
+            text:
+              lang === "ta"
+                ? `${mm.name} — ${formatCurrency(priceOf(mm))}.`
+                : lang === "tanglish"
+                  ? `${mm.name} — ${formatCurrency(priceOf(mm))}.`
+                  : `${mm.name} at ${formatCurrency(priceOf(mm))}.`,
+            suggestions: [toSuggestion(mm, catNameOf(mm))],
+            scopeIds: [mm.id],
+            scopeLabel: mm.name,
+          };
+        }
+      }
+    }
   }
 
   // --- Nothing confident ---
@@ -888,6 +1095,111 @@ function underListText(under: MenuItem[], cap: number, lang: ChatLanguage): stri
   if (lang === "ta") return `₹${cap}-க்குள்: ${list}.`;
   if (lang === "tanglish") return `₹${cap} kulla: ${list}.`;
   return `Under ₹${cap}: ${list}.`;
+}
+
+/** General restaurant conversation — greetings/help/how-to-order. Never a no-match. */
+function generalConversationText(raw: string, lang: ChatLanguage, ctx: ChatMenuContext): string {
+  const norm = normalizeMenuName(transliterateTamilFoodWords(raw));
+  const pad = ` ${norm} `;
+  if (/how (to|do|can).*order|how to use|what can you do|help/.test(pad)) {
+    return lang === "ta"
+      ? "மெனுவை browse செய்யுங்கள், உணவை தேர்ந்து cart-ல் சேர்த்து checkout செய்யுங்கள். Voice order-ம் உள்ளது."
+      : lang === "tanglish"
+        ? "Menu browse pannunga, dish select panni cart-la add panni checkout pannunga. Voice order-um iruku."
+        : "Browse the menu, add dishes to your cart, then checkout. Voice ordering is also available.";
+  }
+  if (/vanakkam|hello|\bhi\b|hey|thanks|thank|nandri/.test(pad)) {
+    return lang === "ta"
+      ? `வணக்கம்! ${ctx.restaurantName}-க்கு வருக. Food, price, order pathi kelunga.`
+      : lang === "tanglish"
+        ? `Vanakkam! ${ctx.restaurantName}-ku welcome. Food, price, order pathi kelunga.`
+        : `Hi! Welcome to ${ctx.restaurantName}. Ask me about food, prices, or orders.`;
+  }
+  return lang === "ta"
+    ? `நான் ${ctx.restaurantName} உதவியாளர். Menu, price, availability pathi kelunga.`
+    : lang === "tanglish"
+      ? `Naan ${ctx.restaurantName} assistant. Menu, price, availability pathi kelunga.`
+      : `I'm the ${ctx.restaurantName} assistant. Ask me about the menu, prices, or availability.`;
+}
+
+/**
+ * Comparison from REAL docs only — price + availability + category.
+ * Never invents taste/health claims. Returns null when fewer than two real
+ * dishes are identified.
+ */
+function compareDishes(
+  raw: string,
+  menu: MenuItem[],
+  catNameOf: (m: MenuItem) => string,
+  lang: ChatLanguage
+): ChatReply | null {
+  const norm = normalizeMenuName(transliterateTamilFoodWords(raw));
+  // Split on comparison delimiters to isolate each side.
+  const parts = raw.split(/\bvs\b|versus|compare|and|,/i).map((p) => p.trim()).filter(Boolean);
+  const found: MenuItem[] = [];
+  const seen = new Set<string>();
+  const candidates = parts.length >= 2 ? parts : [raw];
+  for (const part of candidates) {
+    const cleaned = normalizeMenuName(transliterateTamilFoodWords(part))
+      .split(" ")
+      .filter((t) => t.length > 1 && !DETAIL_FILLER.has(t))
+      .join(" ");
+    if (!cleaned) continue;
+    const hit = findMenuMatch(cleaned, menu);
+    if (hit.kind === "match" && !seen.has(hit.item.id)) {
+      seen.add(hit.item.id);
+      found.push(hit.item);
+    } else if (hit.kind === "ambiguous") {
+      // Take the first available option deterministically (cheapest first).
+      const sorted = [...hit.options].sort((a, b) => priceOf(a) - priceOf(b));
+      const pick = sorted[0];
+      if (pick && !seen.has(pick.id)) {
+        seen.add(pick.id);
+        found.push(pick);
+      }
+    }
+    if (found.length >= 2) break;
+  }
+  // Fallback: scan all menu items for token overlap when split failed.
+  if (found.length < 2) {
+    const toks = new Set(norm.split(" ").filter((t) => t.length >= 3));
+    for (const m of menu) {
+      if (seen.has(m.id)) continue;
+      const nameToks = normalizeMenuName(m.name).split(" ").filter((t) => t.length >= 3);
+      if (nameToks.some((t) => toks.has(t)) && found.length < 2) {
+        // Only accept when at least 2 name tokens or a distinctive token hits.
+        const hits = nameToks.filter((t) => toks.has(t)).length;
+        if (hits >= 1 && (nameToks.length <= 2 || hits >= 2 || nameToks.some((t) => t.length >= 6 && toks.has(t)))) {
+          seen.add(m.id);
+          found.push(m);
+        }
+      }
+      if (found.length >= 2) break;
+    }
+  }
+  if (found.length < 2) return null;
+  const [a, b] = found;
+  const cheaper = priceOf(a) <= priceOf(b) ? a : b;
+  const pricier = cheaper === a ? b : a;
+  const availBit = (m: MenuItem) =>
+    lang === "ta"
+      ? isAvailableItem(m) ? "கிடைக்கிறது" : "கிடைக்கவில்லை"
+      : lang === "tanglish"
+        ? isAvailableItem(m) ? "available" : "currently illa"
+        : isAvailableItem(m) ? "available" : "unavailable";
+  const text =
+    lang === "ta"
+      ? `${a.name} (${formatCurrency(priceOf(a))}, ${availBit(a)}, ${catNameOf(a) || a.categoryId}) vs ${b.name} (${formatCurrency(priceOf(b))}, ${availBit(b)}, ${catNameOf(b) || b.categoryId}). மலிவானது ${cheaper.name} (${formatCurrency(priceOf(cheaper))}).`
+      : lang === "tanglish"
+        ? `${a.name} (${formatCurrency(priceOf(a))}, ${availBit(a)}) vs ${b.name} (${formatCurrency(priceOf(b))}, ${availBit(b)}). Cheapest: ${cheaper.name} (${formatCurrency(priceOf(cheaper))}).`
+        : `${a.name} (${formatCurrency(priceOf(a))}, ${availBit(a)}, ${catNameOf(a) || a.categoryId}) vs ${b.name} (${formatCurrency(priceOf(b))}, ${availBit(b)}, ${catNameOf(b) || b.categoryId}). Cheaper: ${cheaper.name} at ${formatCurrency(priceOf(cheaper))}.`;
+  void pricier;
+  return {
+    text,
+    suggestions: [toSuggestion(a, catNameOf(a)), toSuggestion(b, catNameOf(b))],
+    scopeIds: [a.id, b.id],
+    scopeLabel: `${a.name} vs ${b.name}`,
+  };
 }
 
 const RECOMMEND_TRIGGERS = [
