@@ -8,6 +8,7 @@ import { useCart } from "../../context/CartContext";
 import { getTable } from "../../services/tableService";
 import { createOrder } from "../../services/orderService";
 import { getRestaurantContext } from "../../utils/session";
+import { recordOrder } from "../../utils/orderHistory";
 import { formatCurrency } from "../../utils/formatting";
 import { calculateBill } from "../../utils/billing";
 import { Button } from "../../components/common/Button";
@@ -170,6 +171,16 @@ export default function Checkout() {
         specialInstructions: instructions,
       });
       if (import.meta.env.DEV) console.log("[ORDER] create success", { orderId, hasTrackingToken: !!trackingToken });
+      // Remember this browser's own order for Previous Orders (private to
+      // this device; other sessions hold different references).
+      recordOrder({
+        orderId,
+        trackingToken,
+        restaurantId: restaurant.id,
+        tableId: table.id,
+        tableNumber: table.tableNumber,
+        createdAt: Date.now(),
+      });
       clear();
       navigate(`/order/${orderId}?token=${trackingToken}`);
     } catch (e: unknown) {
