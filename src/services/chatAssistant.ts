@@ -2,12 +2,13 @@ import type { MenuItem, MenuCategory } from "../types/menu";
 import type { OrderIntent } from "../types/aiOrder";
 import {
   fallbackParseVoiceClient,
+  findMenuMatch,
   normalizeMenuName,
   resolveNaturalIntent,
   resolveVoiceIntent,
   transliterateTamilFoodWords,
 } from "./aiMenuMatcher";
-import { answerMenuQuestion, scopeHit, type AnswerLang } from "./naturalLanguageOrderService";
+import { answerMenuQuestion, scopeFilter, scopeHit, type AnswerLang } from "./naturalLanguageOrderService";
 import { formatCurrency } from "../utils/formatting";
 
 export type ChatLanguage = AnswerLang;
@@ -25,6 +26,9 @@ export interface ChatMenuContext {
   address: string;
   phone: string;
   isActive: boolean;
+  gstPercent?: number;
+  serviceChargePercent?: number;
+  tableNumber?: number | string | null;
   categories: MenuCategory[];
   cart: ChatCartLine[];
   cartTotal: number;
@@ -40,6 +44,7 @@ export interface ChatSuggestion {
   price: number;
   available: boolean;
   category: string;
+  description?: string;
 }
 
 export interface ChatReply {
@@ -167,8 +172,173 @@ function toSuggestion(m: MenuItem, catName: string, quantity = 1): ChatSuggestio
     price: priceOf(m),
     available: isAvailableItem(m),
     category: catName,
+    description: (m.description || "").slice(0, 160) || undefined,
     quantity,
   };
+}
+
+/** Price range like "100 to 200", "between ₹150 and ₹250", "₹100 முதல் ₹200 வரை". Pure. */
+export function extractPriceRange(text: string): { min: number; max: number } | null {
+  const t = text.replace(/₹/g, "₹ ").replace(/,/g, "");
+  const patterns = [
+    /between\s*₹?\s*(\d{2,4})\s*(?:and|&|to)\s*₹?\s*(\d{2,4})/i,
+    /₹?\s*(\d{2,4})\s*(?:to|-|–|முதல்|muthal|lendhu|from)\s*₹?\s*(\d{2,4})\s*(?:varaikum|வரை|varai)?/i,
+    /(\d{2,4})\s*(?:lendhu|முதல்)\s*\S*\s*(\d{2,4})\s*(?:varaikum|வரை)/i,
+  ];
+  for (const p of patterns) {
+    const m = t.match(p);
+    if (m) {
+      const a = parseInt(m[1], 10);
+      const b = parseInt(m[2], 10);
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        return { min: Math.min(a, b), max: Math.max(a, b) };
+      }
+    }
+  }
+  return null;
+}
+
+const DETAIL_FILLER = new Set([
+  "tell", "me", "about", "details", "detail", "describe", "explain", "info", "sollu", "sollunga",
+  "the", "a", "an", "this", "that", "food", "item", "dish", "please", "konjam", "enna", "ena",
+  "விவரம்", "சொல்லுங்கள்", "பற்றி", "என்ன",
+]);
+
+/** Scope remainder for count/range/cheap queries (dish/category words only). */
+export function remainderScope(rawText: string): string {
+  return normalizeMenuName(transliterateTamilFoodWords(rawText))
+    .split(" ")
+    .filter(
+      (t) =>
+        t.length > 2 &&
+        !DETAIL_FILLER.has(t) &&
+        !/^(how|many|much|cheapest|cheap|most|expensive|costliest|costly|under|below|less|between|ethana|kuraintha|malivana|show|list|enna|iruku|iruka|kulla|keela|varaikum|to|from|muthal|lendhu|and|what|which|kaatu|kaattu|kattu|is|the|are|do|does|you|your|a|an|that|this|it|of|in|on|for|my|dhaan|thaan)$/.test(t) &&
+        /^[^0-9]*$/.test(t)
+    )
+    .join(" ");
+}
+
+/**
+ * True when NONE of the scope tokens resemble any real menu word — i.e. the
+ * query carries no dish/category signal ("அதிக விலை உணவு எது?",
+ * "costliest food?"). Such generic superlatives safely use the full menu.
+ * When at least one token hits (e.g. "dosa" in "which dosa"), the scope is
+ * specific and must NOT fall back — later handlers resolve it precisely.
+ */
+function isGenericScope(scope: string, menu: MenuItem[], catNameOf: (m: MenuItem) => string): boolean {
+  const toks = scope.split(" ").filter((t) => t.length >= 3);
+  if (toks.length === 0) return true;
+  const hays = menu.map((mm) => `${normalizeMenuName(mm.name)} ${normalizeMenuName(catNameOf(mm))}`);
+  return !toks.some((tok) => hays.some((h) => h.includes(tok) || tok.includes(h) || scopeHit(tok, h)));
+}
+
+/** Finds the single real dish a detail question asks about (tolerant). */
+export function detailQueryItem(rawText: string, norm: string, menu: MenuItem[]): MenuItem | null {
+  void norm;
+  const cleaned = normalizeMenuName(transliterateTamilFoodWords(rawText))
+    .split(" ")
+    .filter((t) => t.length > 1 && !DETAIL_FILLER.has(t))
+    .join(" ");
+  if (!cleaned) return null;
+  const hit = findMenuMatch(cleaned, menu);
+  return hit.kind === "match" ? hit.item : null;
+}
+
+/** Restaurant summary from real fields only — missing fields are omitted, never invented. */
+export function restaurantSummary(ctx: ChatMenuContext, lang: ChatLanguage, menu?: MenuItem[]): string {
+  const bits: string[] = [ctx.restaurantName];
+  if (ctx.description) bits.push(ctx.description.slice(0, 200));
+  if (ctx.address) {
+    bits.push(
+      lang === "ta" ? `முகவரி: ${ctx.address}` : lang === "tanglish" ? `Address: ${ctx.address}` : `Location: ${ctx.address}`
+    );
+  }
+  if (ctx.phone) {
+    bits.push(
+      lang === "ta" ? `தொலைபேசி: ${ctx.phone}` : `Phone: ${ctx.phone}`
+    );
+  }
+  const status =
+    lang === "ta"
+      ? ctx.isActive ? "தற்போது திறந்துள்ளது." : "தற்போது மூடப்பட்டுள்ளது."
+      : lang === "tanglish"
+        ? ctx.isActive ? "Ippo open." : "Ippo closed."
+        : ctx.isActive ? "Open right now." : "Currently closed.";
+  bits.push(status);
+  if (menu) {
+    const avail = menu.filter((mm) => isAvailableItem(mm)).length;
+    const cats = ctx.categories.map((c) => c.name).filter(Boolean);
+    bits.push(
+      lang === "ta"
+        ? `மெனு: ${menu.length} உணவுகள் (${avail} கிடைக்கிறது). வகைகள்: ${cats.slice(0, 8).join(", ")}.`
+        : lang === "tanglish"
+          ? `Menu: ${menu.length} items (${avail} available). Categories: ${cats.slice(0, 8).join(", ")}.`
+          : `Menu: ${menu.length} items (${avail} available). Categories: ${cats.slice(0, 8).join(", ")}.`
+    );
+  }
+  return bits.join(" ");
+}
+
+/** Menu summary — every number derived live from the loaded menu. */
+export function menuSummary(menu: MenuItem[], ctx: ChatMenuContext, lang: ChatLanguage): string {
+  const total = menu.length;
+  const avail = menu.filter((m) => isAvailableItem(m));
+  const prices = avail.map((m) => priceOf(m));
+  const cats = ctx.categories.map((c) => c.name).filter(Boolean);
+  const range =
+    prices.length > 0
+      ? `${formatCurrency(Math.min(...prices))}–${formatCurrency(Math.max(...prices))}`
+      : "";
+  if (lang === "ta")
+    return `மெனுவில் மொத்தம் ${total} உணவுகள் (${avail.length} கிடைக்கிறது), ${cats.length} வகைகள்${range ? `, விலை ${range}` : ""}. வகைகள்: ${cats.slice(0, 8).join(", ")}.`;
+  if (lang === "tanglish")
+    return `Menula total ${total} items (${avail.length} available), ${cats.length} categories${range ? `, price ${range}` : ""}. Categories: ${cats.slice(0, 8).join(", ")}.`;
+  return `The menu has ${total} items (${avail.length} available) across ${cats.length} categories${range ? `, priced ${range}` : ""}. Categories include: ${cats.slice(0, 8).join(", ")}.`;
+}
+
+/** Food detail from the real doc — description/stock only when present. */
+export function foodDetailText(m: MenuItem, catName: string, lang: ChatLanguage): string {
+  const head = `${m.name}. Price: ${formatCurrency(priceOf(m))}. Category: ${catName || m.categoryId}.`;
+  const avail =
+    lang === "ta"
+      ? isAvailableItem(m)
+        ? "கிடைக்கிறது."
+        : "தற்போது கிடைக்கவில்லை."
+      : lang === "tanglish"
+        ? isAvailableItem(m)
+          ? "Available."
+          : "Currently illa."
+        : isAvailableItem(m)
+          ? "Available."
+          : "Currently unavailable.";
+  const parts = [head, `Availability: ${avail}`];
+  if (m.description?.trim()) parts.push(`Description: ${m.description.trim().slice(0, 200)}`);
+  const track = m.trackStock === true || m.stockEnabled === true;
+  const qty = Number(m.stockQuantity);
+  if (track && Number.isFinite(qty) && qty > 0) {
+    parts.push(
+      lang === "ta"
+        ? `Stock: ${qty} உள்ளது.`
+        : lang === "tanglish"
+          ? `Stock: ${qty} iruku.`
+          : `Stock status: ${qty} remaining.`
+    );
+  }
+  return parts.join(" ");
+}
+
+/** Availability sentence from the real menu doc. Never invented. */
+export function availabilityText(m: MenuItem, lang: ChatLanguage): string {
+  if (!isAvailableItem(m)) {
+    if (lang === "ta") return `${m.name} தற்போது கிடைக்கவில்லை.`;
+    if (lang === "tanglish") return `${m.name} currently illa.`;
+    return `${m.name} is currently unavailable.`;
+  }
+  return lang === "ta"
+    ? `${m.name} கிடைக்கிறது.`
+    : lang === "tanglish"
+      ? `${m.name} available.`
+      : `${m.name} is available.`;
 }
 
 /**
@@ -195,6 +365,17 @@ export function answerChat(
   const hasWord = (...words: string[]) =>
     words.some((w) => norm.includes(w));
 
+  // --- "it" follow-up: unambiguous single-item context only ---
+  if (ctx.lastIds?.length === 1 && (/\bit\b/.test(norm) || norm.includes("அது"))) {
+    const one = menu.find((m) => m.id === ctx.lastIds![0]);
+    if (one) {
+      const sub = text.replace(/\bit\b/gi, one.name).replace(/அது/g, one.name);
+      if (sub !== text) {
+        return answerChat(sub, menu, { ...ctx, lastIds: undefined, lastLabel: undefined });
+      }
+    }
+  }
+
   // --- Cart questions (all languages use "cart") ---
   if (norm.includes("cart")) {
     const fb = fallbackParseVoiceClient(text, menu);
@@ -216,19 +397,48 @@ export function answerChat(
   }
 
   // --- Restaurant questions (only from real fields; never hallucinated) ---
-  if (hasWord("opening", "opening hours", "open at", "open time", "timing", "closes", "closing", "what time", "thora", "திறக்கும்", "மூடும்", "நேரம்")) {
-    if (hasWord("open") && hasWord("restaurant", "hotel", "shop", "kadai", "கடை") && !hasWord("hour", "time", "timing", "close", "closes", "closing")) {
-      const open = ctx.isActive;
-      return {
-        text:
-          lang === "ta"
-            ? open ? `ஆம், ${ctx.restaurantName} தற்போது திறந்துள்ளது.` : `${ctx.restaurantName} தற்போது மூடப்பட்டுள்ளது.`
-            : lang === "tanglish"
-              ? open ? `Yes, ${ctx.restaurantName} ippo open.` : `${ctx.restaurantName} ippo closed.`
-              : open ? `Yes, ${ctx.restaurantName} is open right now.` : `${ctx.restaurantName} is currently closed.`,
-      };
-    }
+  // Time-asking ("what time open?", "open time enna?", "எப்போ திறக்கும்?") → hours unavailable.
+  // The Restaurant schema has NO opening-hours field, so this is always missing.
+  const asksTime =
+    hasWord("what time", "open at", "open time", "opening hours", "opening time", "timing", "timings", "closes", "closing", "thora", "eppo", "epo", "எப்போ", "நேரம்", "திறக்கும்", "மூடும்") ||
+    (norm.includes("open") && hasWord("hour", "hours", "time", "timing", "timings", "close", "closes", "closing"));
+  if (asksTime) {
     return { text: S.hoursMissing };
+  }
+  // Open-status ("is restaurant open?", "restaurant open ah?", "கடை திறந்திருக்கிறதா?") → real isActive.
+  if (
+    norm.includes("open") ||
+    norm.includes("opened") ||
+    norm.includes("திறந்த") ||
+    norm.includes("மூடப்பட்ட") ||
+    (hasWord("open", "opened", "thora", "திறந்த") && hasWord("restaurant", "hotel", "shop", "kadai", "hotel peru", "கடை", "உணவக"))
+  ) {
+    const open = ctx.isActive;
+    return {
+      text:
+        lang === "ta"
+          ? open ? `ஆம், ${ctx.restaurantName} தற்போது திறந்துள்ளது.` : `${ctx.restaurantName} தற்போது மூடப்பட்டுள்ளது.`
+          : lang === "tanglish"
+            ? open ? `Yes, ${ctx.restaurantName} ippo open.` : `${ctx.restaurantName} ippo closed.`
+            : open ? `Yes, ${ctx.restaurantName} is open right now.` : `${ctx.restaurantName} is currently closed.`,
+    };
+  }
+  // Unsupported metadata — the Restaurant/MenuItem schemas have NO such fields.
+  // Always answer "not available", never invent. Covers email/delivery/offers/
+  // parking/wifi/reservation/ingredients/calories/allergens/spice/portion.
+  if (
+    hasWord("email", "mail", "e-mail", "மின்னஞ்சல்") ||
+    norm.includes("parking") || norm.includes("park ") || norm.includes("car park") ||
+    norm.includes("wifi") || norm.includes("wi-fi") || norm.includes("internet") ||
+    norm.includes("deliver") || norm.includes("delivery") || norm.includes("takeaway") || norm.includes("take away") ||
+    norm.includes("offer") || norm.includes("discount") || norm.includes("coupon") || norm.includes("deal") ||
+    norm.includes("reserv") || norm.includes("book a table") || norm.includes("table book") ||
+    norm.includes("ingredient") || norm.includes("calorie") || norm.includes("protein") ||
+    norm.includes("allergen") || norm.includes("allergy") || norm.includes("spice level") || norm.includes("spicy level") ||
+    norm.includes("portion") || norm.includes("preparation time") || norm.includes("cooking time") ||
+    hasWord("parkin", "parking", "wifi", "offer", "offers", "delivery", "reservation")
+  ) {
+    return { text: unsupportedMissing(lang) };
   }
   if (hasWord("cuisine")) {
     const cats = ctx.categories.filter((c) => (c as { isActive?: boolean }).isActive !== false).map((c) => c.name);
@@ -268,11 +478,242 @@ export function answerChat(
     }
     return { text: addressMissing(lang) };
   }
-  if (hasWord("phone", "contact", "call", "number") && !hasWord("chicken 65", "65")) {
+  // Word-boundary phone check: substring "call" must NOT hijack "called"
+  // ("What is this restaurant called?" is a name question, not a phone one).
+  const asksPhone =
+    hasWord("phone", "contact", "தொலைபேசி") ||
+    /\bcall\b/.test(norm) ||
+    /\bnumber\b/.test(norm);
+  if (asksPhone && !norm.includes("65")) {
     if (ctx.phone) {
       return { text: lang === "ta" ? `தொலைபேசி: ${ctx.phone}` : `Phone: ${ctx.phone}` };
     }
-    return { text: S.hoursMissing };
+    return { text: phoneMissing(lang) };
+  }
+
+  // --- Restaurant identity / summary (real fields only) ---
+  const restaurantWord = hasWord("restaurant", "hotel", "kadai", "shop", "உணவக", "கடை", "restaurant peru", "hotel peru");
+  if (
+    hasWord("called", "peru", "பெயர்") ||
+    (restaurantWord && hasWord("name", "about", "details", "detail", "tell", "sollu", "விவர"))
+  ) {
+    if (hasWord("about", "details", "detail", "tell", "sollu", "விவர")) {
+      return { text: restaurantSummary(ctx, lang, menu) };
+    }
+    return {
+      text:
+        lang === "ta"
+          ? `இந்த உணவகத்தின் பெயர் ${ctx.restaurantName}.`
+          : lang === "tanglish"
+            ? `Indha restaurant peru ${ctx.restaurantName}.`
+            : `This restaurant is called ${ctx.restaurantName}.`,
+    };
+  }
+  if (restaurantWord && hasWord("many", "count", "total", "ethana", "எத்தனை", "items", "foods", "dishes")) {
+    const total = menu.length;
+    const avail = menu.filter((m) => isAvailableItem(m)).length;
+    return {
+      text:
+        lang === "ta"
+          ? `${ctx.restaurantName}-ல் மொத்தம் ${total} உணவுகள் உள்ளன (${avail} கிடைக்கிறது).`
+          : lang === "tanglish"
+            ? `${ctx.restaurantName}-la total ${total} food items iruku (${avail} available).`
+            : `${ctx.restaurantName} has ${total} food items on the menu (${avail} currently available).`,
+      scopeIds: menu.map((m) => m.id),
+      scopeLabel: "menu",
+    };
+  }
+  // GST / service charge / payment info — real settings only.
+  if (norm.includes("gst")) {
+    const g = Number(ctx.gstPercent) || 0;
+    return {
+      text:
+        g > 0
+          ? lang === "ta"
+            ? `GST ${g}% உள்ளது. Bill-ல் முழு விவரம் இருக்கும்.`
+            : lang === "tanglish"
+              ? `GST ${g}% iruku. Full breakup bill-la irukum.`
+              : `Yes, GST is ${g}%. Your digital bill shows the full breakup.`
+          : lang === "ta"
+            ? "GST எதுவும் அமைக்கப்படவில்லை."
+            : lang === "tanglish"
+              ? "GST onnum set pannala."
+              : "No GST is configured for this restaurant.",
+    };
+  }
+  if (norm.includes("service charge") || norm.includes("servicecharge")) {
+    const s = Number(ctx.serviceChargePercent) || 0;
+    return {
+      text:
+        s > 0
+          ? lang === "ta"
+            ? `Service charge ${s}% உள்ளது. Bill-ல் முழு விவரம் இருக்கும்.`
+            : lang === "tanglish"
+              ? `Service charge ${s}% iruku. Full breakup bill-la irukum.`
+              : `Yes, there is a ${s}% service charge. Your digital bill shows the full breakup.`
+          : lang === "ta"
+            ? "Service charge எதுவும் அமைக்கப்படவில்லை."
+            : lang === "tanglish"
+              ? "Service charge onnum set pannala."
+              : "There is no service charge configured for this restaurant.",
+    };
+  }
+  if (hasWord("payment", "pay", "paying", "bill") && !hasWord("request bill", "bill request", "bill kaatu")) {
+    const bits: string[] = [];
+    if ((Number(ctx.gstPercent) || 0) > 0) bits.push(`GST ${ctx.gstPercent}%`);
+    if ((Number(ctx.serviceChargePercent) || 0) > 0) bits.push(`service charge ${ctx.serviceChargePercent}%`);
+    const detail = bits.length > 0 ? bits.join(" and ") : "";
+    return {
+      text:
+        lang === "ta"
+          ? detail
+            ? `Bill-ல் ${detail} இருக்கும். முழு விவரம் digital bill-ல் காட்டும்.`
+            : "Bill விவரம் digital bill-ல் காட்டும்."
+          : lang === "tanglish"
+            ? detail
+              ? `Bill-la ${detail} irukum. Full breakup digital bill-la paakalaam.`
+              : "Bill details digital bill-la paakalaam."
+            : detail
+              ? `Your digital bill includes ${detail}. You can view the full breakup on the bill page.`
+              : "You can view the full bill breakup on the digital bill page.",
+    };
+  }
+  // Menu summary — all numbers derived live from the loaded menu.
+  if (hasWord("about the menu", "about menu", "menu pathi", "மெனு பற்றி", "menu summary", "menu details")) {
+    return { text: menuSummary(menu, ctx, lang) };
+  }
+
+  // --- Food detail / category-of (real doc facts only) ---
+  {
+    const detailHit = detailQueryItem(text, norm, menu);
+    if (detailHit) {
+      if (hasWord("categor", "வகை", "entha category", "which category")) {
+        const cat = catNameOf(detailHit) || detailHit.categoryId;
+        return {
+          text:
+            lang === "ta"
+              ? `${detailHit.name} — ${cat} வகையைச் சேர்ந்தது.`
+              : lang === "tanglish"
+                ? `${detailHit.name} — ${cat} category.`
+                : `${detailHit.name} is in ${cat}.`,
+          suggestions: [toSuggestion(detailHit, catNameOf(detailHit))],
+          scopeIds: [detailHit.id],
+          scopeLabel: detailHit.name,
+        };
+      }
+      if (hasWord("tell", "about", "details", "detail", "sollu", "விவரம்", "describe", "explain", "info")) {
+        return {
+          text: foodDetailText(detailHit, catNameOf(detailHit), lang),
+          suggestions: [toSuggestion(detailHit, catNameOf(detailHit))],
+          scopeIds: [detailHit.id],
+          scopeLabel: detailHit.name,
+        };
+      }
+    }
+  }
+
+  // --- Price range / most expensive / cheapest overall / scoped counts ---
+  {
+    const range = extractPriceRange(text);
+    if (range) {
+      const scope = remainderScope(text);
+      let base = scope ? scopeFilter(scope, menu, catNameOf) : [...menu];
+      // Generic food words ("உணவு காட்டு", "food") match no real dish — fall
+      // back to the full menu so the numeric range still filters correctly.
+      if (scope && base.length === 0) base = [...menu];
+      const inRange = base.filter((m) => isAvailableItem(m) && priceOf(m) >= range.min && priceOf(m) <= range.max).sort((a, b) => priceOf(a) - priceOf(b));
+      if (inRange.length > 0) {
+        const shown = inRange.slice(0, 5);
+        const list = inRange.map((m) => `${m.name} at ${formatCurrency(priceOf(m))}`).join(", ").slice(0, 500);
+        return {
+          text:
+            lang === "ta"
+              ? `₹${range.min} முதல் ₹${range.max} வரை ${inRange.length} உணவுகள்: ${list}.`
+              : lang === "tanglish"
+                ? `₹${range.min} to ₹${range.max} kulla ${inRange.length} items: ${list}.`
+                : `Found ${inRange.length} items between ${formatCurrency(range.min)} and ${formatCurrency(range.max)}: ${list}.`,
+          suggestions: shown.map((m) => toSuggestion(m, catNameOf(m))),
+          scopeIds: inRange.map((m) => m.id),
+          scopeLabel: `₹${range.min}-₹${range.max}`,
+        };
+      }
+    }
+    if (/\bmost expensive\b|\bcostliest\b|\bcostly\b|அதிக விலை|விலை அதிகம்|costly food|விலை உயர்ந்த/.test(norm)) {
+      const scope = remainderScope(text);
+      // Bare superlative with live follow-up context ("Which is cheapest?"
+      // after a biriyani listing) belongs to the follow-up handler below.
+      if (!scope && ctx.lastIds && ctx.lastIds.length > 0) {
+        // fall through to scoped follow-up
+      } else {
+      let base = (scope ? scopeFilter(scope, menu, catNameOf) : [...menu]).filter((m) => isAvailableItem(m));
+      // Generic superlative with no dish signal → full menu. Specific but
+      // unmatched scope falls through to the shared Q&A / follow-up handlers.
+      if (scope && base.length === 0 && isGenericScope(scope, menu, catNameOf)) {
+        base = menu.filter((m) => isAvailableItem(m));
+      }
+      if (base.length > 0) {
+        const win = [...base].sort((a, b) => priceOf(b) - priceOf(a))[0];
+        return {
+          text:
+            lang === "ta"
+              ? `அதிக விலை உணவு ${win.name}, ${formatCurrency(priceOf(win))}.`
+              : lang === "tanglish"
+                ? `Costliest: ${win.name}, ${formatCurrency(priceOf(win))}.`
+                : `The most expensive is ${win.name} at ${formatCurrency(priceOf(win))}.`,
+          suggestions: [toSuggestion(win, catNameOf(win))],
+          scopeIds: [win.id],
+          scopeLabel: win.name,
+        };
+      }
+      }
+    }
+    if (/\bhow many\b|ethana|எத்தனை/.test(norm)) {
+      const scope = remainderScope(text);
+      if (scope) {
+        const cands = scopeFilter(scope, menu, catNameOf);
+        if (cands.length > 0) {
+          const shown = [...cands].sort((a, b) => priceOf(a) - priceOf(b)).slice(0, 5);
+          return {
+            text:
+              lang === "ta"
+                ? `${cands.length} ${scope} வகைகள் உள்ளன: ${cands.slice(0, 7).map((m) => m.name).join(", ")}.`
+                : lang === "tanglish"
+                  ? `${cands.length} ${scope} iruku: ${cands.slice(0, 7).map((m) => m.name).join(", ")}.`
+                  : `There are ${cands.length} ${scope} items: ${cands.slice(0, 7).map((m) => m.name).join(", ")}.`,
+            suggestions: shown.map((m) => toSuggestion(m, catNameOf(m))),
+            scopeIds: cands.map((m) => m.id),
+            scopeLabel: scope,
+          };
+        }
+      }
+    }
+    if (/\bcheapest\b|\bcheap\b|kuraintha|குறைந்த|malivana|மலிவான/.test(norm)) {
+      const scope = remainderScope(text);
+      // Bare superlative with live follow-up context belongs to the scoped
+      // follow-up handler below, not the global cheapest.
+      if (!scope && ctx.lastIds && ctx.lastIds.length > 0) {
+        // fall through to scoped follow-up
+      } else {
+        let base = (scope ? scopeFilter(scope, menu, catNameOf) : [...menu]).filter((m) => isAvailableItem(m));
+        if (scope && base.length === 0 && isGenericScope(scope, menu, catNameOf)) {
+          base = menu.filter((m) => isAvailableItem(m));
+        }
+        if (base.length > 0) {
+          const win = [...base].sort((a, b) => priceOf(a) - priceOf(b))[0];
+          return {
+            text:
+              lang === "ta"
+                ? `மலிவானது ${win.name}, ${formatCurrency(priceOf(win))}.`
+                : lang === "tanglish"
+                  ? `Cheapest: ${win.name}, ${formatCurrency(priceOf(win))}.`
+                  : `The cheapest is ${win.name} at ${formatCurrency(priceOf(win))}.`,
+            suggestions: [toSuggestion(win, catNameOf(win))],
+            scopeIds: [win.id],
+            scopeLabel: win.name,
+          };
+        }
+      }
+    }
   }
 
   // --- Deterministic menu Q&A (same engine as Ask SmartDine) ---
@@ -284,6 +725,39 @@ export function answerChat(
     }
   } catch {
     // fall through to order parsing
+  }
+
+  // --- Price / availability backup (transliteration-aware, never an order) ---
+  // Guarantees "mutton biriyani evlo?" / "மட்டன் பிரியாணி எவ்வளவு?" /
+  // "chicken 65 available ah?" answer from the real doc even if the shared
+  // Q&A misses a Tamil phrasing. Questions never produce an OrderIntent.
+  {
+    const detailHit = detailQueryItem(text, norm, menu);
+    if (detailHit) {
+      const asksPrice = hasWord("how much", "price", "cost", "rate", "evlo", "evalavu", "விலை", "எவ்வளவு");
+      const asksAvail = hasWord("available", "availability", "stock", "kidaikuma", "கிடைக்குமா", "iruka", "iruku", "இருக்கு", "இருக்கா");
+      if (asksPrice && !asksAvail) {
+        return {
+          text:
+            lang === "ta"
+              ? `${detailHit.name} விலை ${formatCurrency(priceOf(detailHit))}.`
+              : lang === "tanglish"
+                ? `${detailHit.name} price ${formatCurrency(priceOf(detailHit))}.`
+                : `${detailHit.name} costs ${formatCurrency(priceOf(detailHit))}.`,
+          suggestions: [toSuggestion(detailHit, catNameOf(detailHit))],
+          scopeIds: [detailHit.id],
+          scopeLabel: detailHit.name,
+        };
+      }
+      if (asksAvail) {
+        return {
+          text: availabilityText(detailHit, lang),
+          suggestions: [toSuggestion(detailHit, catNameOf(detailHit))],
+          scopeIds: [detailHit.id],
+          scopeLabel: detailHit.name,
+        };
+      }
+    }
   }
 
   // --- Order intent (same matcher + resolver as Voice/Ask) ---
@@ -366,6 +840,23 @@ function addressMissing(lang: ChatLanguage): string {
     : lang === "tanglish"
       ? "Address SmartDine-la currently available illa."
       : "The address isn't available in SmartDine right now.";
+}
+
+function phoneMissing(lang: ChatLanguage): string {
+  return lang === "ta"
+    ? "தொலைபேசி எண் தற்போது SmartDine-ல் கிடைக்கவில்லை."
+    : lang === "tanglish"
+      ? "Phone number SmartDine-la currently available illa."
+      : "The phone number isn't available in SmartDine right now.";
+}
+
+/** Generic safe reply for fields the Firestore schema does not have. Never invents. */
+function unsupportedMissing(lang: ChatLanguage): string {
+  return lang === "ta"
+    ? "அந்த விவரம் தற்போது SmartDine-ல் கிடைக்கவில்லை."
+    : lang === "tanglish"
+      ? "Andha detail SmartDine-la currently available illa."
+      : "That detail isn't available in SmartDine right now.";
 }
 
 /** Converts an answerMenuQuestion result into a chat reply (same resolver). */

@@ -113,6 +113,9 @@ export function SmartDineAIChat({
       address: restaurant?.address || "",
       phone: restaurant?.phone || "",
       isActive: restaurant?.isActive !== false,
+      gstPercent: restaurant?.gstPercent ?? 0,
+      serviceChargePercent: restaurant?.serviceChargePercent ?? 0,
+      tableNumber: tableNumber ?? null,
       categories,
       cart: lines.map((l) => ({ menuItemId: l.menuItemId, name: l.name, price: l.price, quantity: l.quantity })),
       cartTotal: total,
@@ -369,8 +372,12 @@ export function SmartDineAIChat({
                             <span className="block text-[13px] font-semibold text-ink-900 truncate">{s.name}</span>
                             <span className="block text-xs text-ink-500 tabular-nums">
                               {formatCurrency(s.price)}
+                              {s.category ? ` • ${s.category}` : ""}
                               {s.available ? "" : " • Unavailable"}
                             </span>
+                            {s.description && (
+                              <span className="block text-xs text-ink-400 line-clamp-2 mt-0.5">{s.description}</span>
+                            )}
                           </span>
                           <button
                             type="button"

@@ -3,7 +3,7 @@ import { app } from "../lib/firebase";
 import type { MenuItem } from "../types/menu";
 import type { NaturalLanguageResult, NaturalLanguageIntent } from "../types/aiOrder";
 import { resolveNaturalIntent } from "./aiMenuMatcher";
-import { fallbackParseVoiceClient, findMenuMatch, normalizeMenuName } from "./aiMenuMatcher";
+import { fallbackParseVoiceClient, findMenuMatch, normalizeMenuName, transliterateTamilFoodWords } from "./aiMenuMatcher";
 import { formatCurrency } from "../utils/formatting";
 
 const MAX_QUERY = 500;
@@ -37,7 +37,7 @@ function transliterateTamilForNatural(s: string): string {
 // order-intent path handle it.
 // ---------------------------------------------------------------------------
 
-const LISTING_TRIGGERS = ["what", "which", "list", "show", "options", "menu", "have", "enna"];
+const LISTING_TRIGGERS = ["what", "which", "list", "show", "options", "menu", "have", "enna", "kaatu", "kaattu", "kattu", "காட்டு"];
 const ORDER_TRIGGERS = ["give", "kudu", "order", "venum", "vendum", "pannu", "pannunga", "add", "want", "get", "bring"];
 const QUESTION_FILLER = new Set([
   "what", "which", "list", "show", "me", "the", "a", "an", "do", "does", "you", "your",
@@ -48,18 +48,28 @@ const QUESTION_FILLER = new Set([
   "items", "item", "dishes", "dish", "food", "things",
   // Tanglish/Tamil question particles and locatives (never dish words).
   "ah", "aa", "aah", "la", "lae", "illa",
-  "இருக்கு", "இருக்கா", "எவ்வளவு", "விலை", "கிடைக்குமா",
+  "kaatu", "kaattu", "kattu", "kaatunga", "kaattunga",
+  "இருக்கு", "இருக்கா", "எவ்வளவு", "விலை", "கிடைக்குமா", "காட்டு", "காட்டுங்கள்",
 ]);
 
 function questionRemainder(query: string): string {
-  return normalizeMenuName(query)
+  return normalizeMenuName(transliterateTamilFoodWords(transliterateTamilForNatural(query)))
     .split(" ")
     .filter((t) => t.length > 1 && !QUESTION_FILLER.has(t))
     .join(" ");
 }
 
 const DRINK_KEYS = ["juice", "coffee", "tea", "drink", "shake", "mojito", "soda", "cola", "mocktail", "milkshake", "chai", "lassi"];
-const DESSERT_KEYS = ["dessert", "cake", "ice cream", "icecream", "pastry", "brownie"];
+const DESSERT_KEYS = ["dessert", "cake", "ice cream", "icecream", "pastry", "brownie", "gulab", "jamun", "halwa", "payasam", "kheer"];
+const SEAFOOD_KEYS = ["fish", "prawn", "shrimp", "crab", "lobster", "squid", "calamari", "tuna", "salmon", "anchovy", "nethili", "vanjaram", "seafood", "sea food"];
+
+/** Stock-aware availability — mirrors Menu.tsx + chatAssistant. Never overrides Firestore. */
+function isAvailableStockAware(m: MenuItem): boolean {
+  if (m.isAvailable !== true) return false;
+  const track = m.trackStock === true || m.stockEnabled === true;
+  if (track && Number(m.stockQuantity) <= 0) return false;
+  return true;
+}
 
 /** Generic scopes resolve against real category/item words — never invented. */
 export function scopeHit(scope: string, hay: string): boolean {
@@ -67,17 +77,20 @@ export function scopeHit(scope: string, hay: string): boolean {
   if (s.length < 3) return false;
   const sing = s.endsWith("s") && s.length > 3 ? s.slice(0, -1) : s;
   if (hay.includes(s) || hay.includes(sing)) return true;
-  // "drinks"/"desserts" style generics: match real category/item keywords.
+  // "drinks"/"desserts"/"seafood" style generics: match real category/item keywords.
   if (sing === "drink" || sing === "beverage") {
     return DRINK_KEYS.some((k) => hay.includes(k));
   }
   if (sing === "dessert" || sing === "sweet") {
     return DESSERT_KEYS.some((k) => hay.includes(k));
   }
+  if (sing === "seafood" || sing === "sea food" || sing === "fish") {
+    return SEAFOOD_KEYS.some((k) => hay.includes(k));
+  }
   return false;
 }
 
-function scopeFilter(
+export function scopeFilter(
   scope: string,
   menu: MenuItem[],
   catNameOf: (m: MenuItem) => string
@@ -141,11 +154,12 @@ export function answerMenuQuestion(
   }
 
   // Availability question: "Is Hyderabadi Chicken Dum Biriyani available?"
+  // Stock-aware: isAvailable=false OR tracked-out-of-stock both read unavailable.
   if (!isOrder && hasWord("available", "availability", "stock", "kidaikuma", "கிடைக்குமா", "iruka", "iruku", "இருக்கு", "இருக்கா")) {
     const hit = findMenuMatch(remainder, menu);
     if (hit.kind === "match") {
       const m = hit.item;
-      const ok = m.isAvailable === true;
+      const ok = isAvailableStockAware(m);
       return {
         matches: [],
         noMatch: false,
@@ -170,7 +184,7 @@ export function answerMenuQuestion(
 
   // Cheapest question: "What is the cheapest dosa?" / "குறைந்த விலை தோசை எது?"
   if (hasWord("cheapest", "cheap", "kuraintha", "குறைந்த", "malivana", "மலிவான")) {
-    const cands = scopeFilter(remainder, menu, catNameOf).filter((m) => m.isAvailable === true);
+    const cands = scopeFilter(remainder, menu, catNameOf).filter((m) => isAvailableStockAware(m));
     if (cands.length > 0) {
       cands.sort((a, b) => priceOf(a) - priceOf(b));
       const win = cands[0];
