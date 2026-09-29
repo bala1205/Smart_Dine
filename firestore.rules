@@ -189,14 +189,14 @@ service cloud.firestore {
 
       function tableReservable(tableId) {
         let t = tableForReservation(tableId);
-        if (!(t != null && t.data.isActive == true && t.data.isAccessAvailable != false)) return false;
-        let hasOid = ('currentOrderId' in t.data) && (t.data.currentOrderId is string) && t.data.currentOrderId.size() > 0;
+        let hasOid = (t != null) && ('currentOrderId' in t.data) && (t.data.currentOrderId is string) && t.data.currentOrderId.size() > 0;
         let oid = hasOid ? t.data.currentOrderId : '___no_such_order___';
         let o = get(/databases/$(database)/documents/restaurants/$(restaurantId)/orders/$(oid));
         let liveOrder = hasOid && o != null
           && (o.data.status == 'PLACED' || o.data.status == 'PREPARING' || o.data.status == 'READY'
             || (o.data.status == 'SERVED' && o.data.paymentStatus != 'PAID'));
-        return !liveOrder;
+        // Single return expression (engine rejects statement-style ifs).
+        return t != null && t.data.isActive == true && t.data.isAccessAvailable != false && !liveOrder;
       }
 
       match /tableReservations/{tableId} {
