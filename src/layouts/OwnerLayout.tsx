@@ -5,6 +5,7 @@ import {
   ListOrdered,
   QrCode,
   ClipboardList,
+  ClipboardCheck,
   Settings,
   LogOut,
   CookingPot,
@@ -27,6 +28,7 @@ const NAV_GROUPS = [
       { to: "/owner/orders", label: "Orders", icon: ClipboardList },
       { to: "/owner/service-requests", label: "Service Requests", icon: BellRing },
       { to: "/owner/tables", label: "Tables", icon: QrCode },
+      { to: "/owner/table-check", label: "Table Check", icon: ClipboardCheck },
     ],
   },
   {

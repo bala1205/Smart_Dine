@@ -11,6 +11,7 @@ import OwnerDashboard from "../pages/owner/Dashboard";
 import OwnerMenu from "../pages/owner/Menu";
 import OwnerCategories from "../pages/owner/Categories";
 import OwnerTables from "../pages/owner/Tables";
+import OwnerTableCheck from "../pages/owner/TableCheck";
 import OwnerOrders from "../pages/owner/Orders";
 import OwnerStaff from "../pages/owner/Staff";
 import OwnerSettings from "../pages/owner/Settings";
@@ -26,6 +27,7 @@ import WaiterLayout from "../layouts/WaiterLayout";
 import WaiterDashboard from "../pages/waiter/Dashboard";
 
 import CustomerMenu from "../pages/customer/Menu";
+import CustomerTableCheck from "../pages/customer/TableCheck";
 import CustomerCheckout from "../pages/customer/Checkout";
 import CustomerOrderTracking from "../pages/customer/OrderTracking";
 import InvalidTable from "../pages/customer/InvalidTable";
@@ -67,6 +69,7 @@ export default function AppRoutes() {
         <Route path="menu" element={<OwnerMenu />} />
         <Route path="categories" element={<OwnerCategories />} />
         <Route path="tables" element={<OwnerTables />} />
+        <Route path="table-check" element={<OwnerTableCheck />} />
         <Route path="orders" element={<OwnerOrders />} />
         <Route path="staff" element={<OwnerStaff />} />
         <Route path="analytics" element={<OwnerAnalytics />} />
@@ -105,6 +108,10 @@ export default function AppRoutes() {
       <Route
         path="/menu/:restaurantId/:tableId"
         element={<CustomerMenu />}
+      />
+      <Route
+        path="/table-check/:restaurantId"
+        element={<CustomerTableCheck />}
       />
       <Route
         path="/checkout"

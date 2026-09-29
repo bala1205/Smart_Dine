@@ -161,6 +161,59 @@ service cloud.firestore {
         allow update: if isOwnerOf(restaurantId) || validGuestTableClaim(tableId);
       }
 
+      // ---------- Table Reservations (Table Check entrance flow) ----------
+      // Pre-menu holds: doc ID == tableId, at most one live reservation per
+      // table. Guests may ONLY write the reservation fields, only for an
+      // active + access-enabled table with no live order, only when no live
+      // foreign reservation exists, and only with a short expiry (5 min +
+      // 2 min clock-skew tolerance). Same-session refresh is allowed.
+      // Reservations never touch occupiedBy/currentOrderId/qrToken and never
+      // create orders — the existing order claim stays authoritative.
+      function tableReservationExpiryOk() {
+        let exp = request.resource.data.expiresAt;
+        let nowMs = request.time.toMillis();
+        return (exp is number) && exp > nowMs && exp <= nowMs + 420000;
+      }
+
+      function tableReservationShapeOk() {
+        return request.resource.data.keys().hasOnly(['sessionId', 'expiresAt', 'createdAt'])
+          && (request.resource.data.sessionId is string)
+          && request.resource.data.sessionId.size() > 0
+          && (request.resource.data.createdAt is number);
+      }
+
+      function tableForReservation(tableId) {
+        let t = get(/databases/$(database)/documents/restaurants/$(restaurantId)/tables/$(tableId));
+        return t;
+      }
+
+      function tableReservable(tableId) {
+        let t = tableForReservation(tableId);
+        if (!(t != null && t.data.isActive == true && t.data.isAccessAvailable != false)) return false;
+        let hasOid = ('currentOrderId' in t.data) && (t.data.currentOrderId is string) && t.data.currentOrderId.size() > 0;
+        let oid = hasOid ? t.data.currentOrderId : '___no_such_order___';
+        let o = get(/databases/$(database)/documents/restaurants/$(restaurantId)/orders/$(oid));
+        let liveOrder = hasOid && o != null
+          && (o.data.status == 'PLACED' || o.data.status == 'PREPARING' || o.data.status == 'READY'
+            || (o.data.status == 'SERVED' && o.data.paymentStatus != 'PAID'));
+        return !liveOrder;
+      }
+
+      match /tableReservations/{tableId} {
+        // Public read so Table Check screens can render live availability.
+        // Documents contain only random session IDs + timestamps (no PII).
+        allow read: if true;
+        allow create: if isOwnerOf(restaurantId)
+          || (tableReservable(tableId) && tableReservationShapeOk() && tableReservationExpiryOk());
+        allow update: if isOwnerOf(restaurantId)
+          || (tableReservable(tableId) && tableReservationShapeOk() && tableReservationExpiryOk()
+            && (
+              !(('expiresAt' in resource.data) && (resource.data.expiresAt is number) && resource.data.expiresAt > request.time.toMillis())
+              || ((resource.data.sessionId is string) && resource.data.sessionId == request.resource.data.sessionId)
+            ));
+        allow delete: if isOwnerOf(restaurantId);
+      }
+
       // ---------- Staff ----------
       match /staff/{staffId} {
         allow read: if signedIn();
