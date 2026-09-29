@@ -12,15 +12,10 @@ import { formatCurrency, formatTime } from "../../utils/formatting";
 import { formatWaitLabel } from "../../services/tableWaitTimeService";
 import {
   canOwnerReleaseTable,
+  formatReservationExpiry,
   ownerReleaseReservation,
   OwnerReleaseError,
 } from "../../services/tableCheckService";
-
-function formatCountdown(ms: number | null): string {
-  if (ms == null) return "";
-  const mins = Math.max(0, Math.ceil(ms / 60000));
-  return `~${mins} min`;
-}
 
 export default function OwnerTableCheck() {
   const { profile } = useAuth();
@@ -195,8 +190,13 @@ export default function OwnerTableCheck() {
                 )}
                 {m.status === "RESERVED" && (
                   <p className="text-xs text-blue-700 mt-1.5 font-medium">
-                    {m.ownReservation ? "Reserved by this session" : "Reserved — selection in progress"}
-                    {m.reservationExpiresInMs != null ? ` • Expires in ${formatCountdown(m.reservationExpiresInMs)}` : ""}
+                    {m.ownReservation ? "Reserved by this session" : "Reserved — Selection in progress"}
+                    {m.reservation
+                      ? (() => {
+                          const expiry = formatReservationExpiry(m.reservation.expiresAt);
+                          return expiry ? ` • ${expiry}` : "";
+                        })()
+                      : ""}
                   </p>
                 )}
                 {isOwner && canOwnerReleaseTable(m.status) && (

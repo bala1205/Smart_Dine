@@ -38,6 +38,14 @@ export function useTableCheck(restaurantId?: string | null) {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [itemsByOrder, setItemsByOrder] = useState<Map<string, OrderItem[]>>(new Map());
   const sessionId = useMemo(() => getOrCreateSessionId(), []);
+  // Lightweight UI clock so countdown text refreshes and expired holds flip
+  // to AVAILABLE locally. Display-only: no Firestore writes on tick; the
+  // stored expiry timestamp + realtime subscriptions stay authoritative.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 15000);
+    return () => window.clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (!restaurantId) return;
@@ -90,7 +98,7 @@ export function useTableCheck(restaurantId?: string | null) {
   const catById = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
 
   const models: TableCheckViewModel[] = useMemo(() => {
-    const now = Date.now();
+    const now = nowTick;
     const sorted = [...tables].sort((a, b) => a.tableNumber - b.tableNumber);
     return sorted.map((table) => {
       const tableOrders = ordersByTable.get(table.id) || [];
@@ -140,7 +148,7 @@ export function useTableCheck(restaurantId?: string | null) {
         wait,
       };
     });
-  }, [tables, ordersByTable, reservations, sessionId, itemsByOrder, menuById, catById]);
+  }, [tables, ordersByTable, reservations, sessionId, itemsByOrder, menuById, catById, nowTick]);
 
   const counts = useMemo(() => {
     let available = 0;

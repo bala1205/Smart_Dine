@@ -17,6 +17,7 @@ import ServiceRequestPanel from "../../components/customer/ServiceRequestPanel";
 import { VoiceOrder } from "../../components/customer/VoiceOrder";
 import { AdaptivePrefsStrip } from "../../components/customer/AdaptivePrefsStrip";
 import { SmartDineAIChat } from "../../components/customer/SmartDineAIChat";
+import { OrderHistorySheet } from "../../components/customer/OrderHistorySheet";
 import { ListenAnnouncer } from "../../components/customer/ListenAnnouncer";
 import { ReadAloudButton } from "../../components/customer/ReadAloudButton";
 import { useAdaptivePrefs } from "../../context/AdaptivePrefsContext";
@@ -333,6 +334,9 @@ export default function CustomerMenu() {
         </div>
         <VoiceOrder restaurantId={restaurantId} menu={items} />
       </section>
+
+      {/* Previous Orders sits above the floating AI Chat trigger */}
+      <OrderHistorySheet restaurantId={restaurantId} />
 
       <SmartDineAIChat
         restaurantId={restaurantId}

@@ -78,6 +78,22 @@ export function reservationDocPath(restaurantId: string, tableId: string): strin
   return `restaurants/${restaurantId}/tableReservations/${tableId}`;
 }
 
+/**
+ * Customer/owner-facing expiry text from the authoritative reservation
+ * timestamp. UI-only: returns null once expired (callers then derive
+ * AVAILABLE through the existing realtime status system — no writes).
+ */
+export function formatReservationExpiry(
+  expiresAt: number,
+  now: number = Date.now()
+): string | null {
+  const ms = expiresAt - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const mins = ms / 60000;
+  if (mins < 1) return "Expires in <1 min";
+  return `Expires in ~${Math.max(1, Math.round(mins))} min`;
+}
+
 export function isReservationLive(
   res: TableReservation | null | undefined,
   now: number = Date.now()

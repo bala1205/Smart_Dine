@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   canOwnerReleaseTable,
   decideReservation,
+  formatReservationExpiry,
   isReservationLive,
   reservationDocPath,
   resolveTableCheckStatus,
@@ -63,6 +64,27 @@ describe("Table Check URL generation", () => {
       "restaurants/restoA/tableReservations/t1"
     );
     expect(reservationDocPath("restoA", "t1")).not.toContain("restoB");
+  });
+});
+
+describe("formatReservationExpiry — dynamic countdown, UI-only", () => {
+  it("5 minutes remaining", () => {
+    expect(formatReservationExpiry(NOW + 5 * 60_000, NOW)).toBe("Expires in ~5 min");
+  });
+  it("3 minutes remaining", () => {
+    expect(formatReservationExpiry(NOW + 3 * 60_000, NOW)).toBe("Expires in ~3 min");
+  });
+  it("under a minute", () => {
+    expect(formatReservationExpiry(NOW + 30_000, NOW)).toBe("Expires in <1 min");
+  });
+  it("expired reads null so callers derive AVAILABLE", () => {
+    expect(formatReservationExpiry(NOW - 1, NOW)).toBeNull();
+    expect(formatReservationExpiry(NOW, NOW)).toBeNull();
+    const r = resolveTableCheckStatus({
+      table: table(), ordersForTable: [],
+      reservation: res("gone", NOW - 1), sessionId: "s", now: NOW,
+    });
+    expect(r.status).toBe("AVAILABLE");
   });
 });
 

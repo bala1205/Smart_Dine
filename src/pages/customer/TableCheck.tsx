@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Armchair, Clock, RefreshCw, Users, Info, ArrowRight, CheckCircle2, ReceiptText } from "lucide-react";
+import { Armchair, Clock, RefreshCw, Users, Info, ArrowRight, CheckCircle2 } from "lucide-react";
 import { useRestaurant } from "../../hooks/useRestaurant";
 import { useTableCheck } from "../../hooks/useTableCheck";
-import { useOrderHistory } from "../../hooks/useOrderHistory";
 import { getOrCreateSessionId } from "../../utils/session";
-import { isLiveOrderStatus } from "../../utils/orderHistory";
 import { getOrderItems } from "../../services/orderService";
 import {
+  formatReservationExpiry,
   reserveTableAtomic,
   TableReservationError,
 } from "../../services/tableCheckService";
 import { formatWaitLabel } from "../../services/tableWaitTimeService";
-import { formatCurrency, formatTime } from "../../utils/formatting";
+import { formatCurrency } from "../../utils/formatting";
 import { PageLoader } from "../../components/common/Spinner";
 import { AccessibleStatus } from "../../components/customer/AccessibleStatus";
 import type { OrderItem } from "../../types/order";
@@ -24,22 +23,6 @@ import type { Table } from "../../types/table";
  * English-first per product requirements.)
  */
 const LANG = "en" as const;
-
-function shortRef(orderId: string): string {
-  return `#${orderId.slice(-4).toUpperCase()}`;
-}
-
-function formatDate(ms: number): string {
-  try {
-    return new Date(ms).toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return "";
-  }
-}
 
 function orderStateLabel(status: string, paymentStatus?: string): string {
   if (status === "SERVED" && paymentStatus === "PAID") return "Completed";
@@ -55,7 +38,6 @@ export default function CustomerTableCheck() {
   const navigate = useNavigate();
   const { restaurant, loading: rLoading } = useRestaurant(restaurantId);
   const { models, counts, loading: tLoading, refresh, sessionId } = useTableCheck(restaurantId);
-  const { orders: historyOrders, loading: hLoading } = useOrderHistory(restaurantId);
   const [browsing, setBrowsing] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [confirmTable, setConfirmTable] = useState<Table | null>(null);
@@ -104,12 +86,6 @@ export default function CustomerTableCheck() {
   const reserved = useMemo(() => models.filter((m) => m.status === "RESERVED" && !m.ownReservation), [models]);
   const occupied = useMemo(() => models.filter((m) => m.status === "OCCUPIED"), [models]);
   const payment = useMemo(() => models.filter((m) => m.status === "PAYMENT_PENDING"), [models]);
-
-  // Previous orders: this browser's history, excluding the live current order.
-  const previousOrders = useMemo(
-    () => historyOrders.filter(({ order }) => order.id !== ownOrder?.id),
-    [historyOrders, ownOrder?.id]
-  );
 
   function continueToMenu(table: Table) {
     navigate(`/menu/${restaurantId}/${table.id}?token=${table.qrToken}`);
@@ -365,13 +341,23 @@ export default function CustomerTableCheck() {
               {reserved.length > 0 && (
                 <div className="mt-5">
                   <h3 className="text-xs font-bold tracking-wide uppercase text-ink-500">Reserved ({reserved.length})</h3>
-                  <ul className="mt-2 space-y-2.5">
-                    {reserved.map((m) => (
-                      <li key={m.table.id} className="bg-surface-50 border border-surface-200 rounded-2xl px-4 py-3">
-                        <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
-                        <span className="block text-xs text-ink-500 mt-1">Reserved • Selection in progress</span>
-                      </li>
-                    ))}
+                  <ul className="mt-2 space-y-2.5" aria-live="polite">
+                    {reserved.map((m) => {
+                      // Dynamic countdown from the authoritative expiry
+                      // timestamp; expired holds flip to Available via the
+                      // realtime status system (no writes on tick).
+                      const expiry = m.reservation
+                        ? formatReservationExpiry(m.reservation.expiresAt)
+                        : null;
+                      return (
+                        <li key={m.table.id} className="bg-surface-50 border border-surface-200 rounded-2xl px-4 py-3">
+                          <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
+                          <span className="block text-xs text-ink-500 mt-1">
+                            Reserved — Selection in progress{expiry ? ` • ${expiry}` : ""}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -408,55 +394,6 @@ export default function CustomerTableCheck() {
                     ))}
                   </ul>
                 </div>
-              )}
-            </section>
-
-            <section aria-labelledby="tc-prev-title" className="bg-white rounded-2xl border border-surface-200 shadow-card p-5">
-              <h2 id="tc-prev-title" className="text-[17px] font-bold tracking-tight text-ink-900 flex items-center gap-2">
-                <ReceiptText className="w-4 h-4 text-ink-400" aria-hidden="true" />
-                Previous Orders
-              </h2>
-              {hLoading ? (
-                <p className="text-sm text-ink-500 mt-2">Loading orders…</p>
-              ) : previousOrders.length === 0 ? (
-                <p className="text-sm text-ink-500 mt-2">No previous orders yet.</p>
-              ) : (
-                <ul className="mt-3 space-y-2.5">
-                  {previousOrders.map(({ order, items }) => {
-                    const live = isLiveOrderStatus(order.status, order.paymentStatus);
-                    return (
-                      <li key={order.id} className="border border-surface-200 rounded-2xl px-4 py-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-bold text-ink-900 text-sm">Order {shortRef(order.id)}</span>
-                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${live ? "bg-blue-50 text-blue-700" : order.status === "CANCELLED" ? "bg-surface-100 text-ink-500" : "bg-green-50 text-green-700"}`}>
-                            {orderStateLabel(order.status, order.paymentStatus)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-ink-500 mt-1">Table {order.tableNumber} • {formatDate(order.createdAt)}{formatTime(order.createdAt) ? `, ${formatTime(order.createdAt)}` : ""}</p>
-                        {items.length > 0 && (
-                          <ul className="mt-1.5 space-y-0.5">
-                            {items.map((it) => (
-                              <li key={it.id} className="flex justify-between text-[13px] gap-2">
-                                <span className="text-ink-700 min-w-0">{it.itemName} <span className="tabular-nums">× {it.quantity}</span></span>
-                                <span className="font-semibold tabular-nums shrink-0">{formatCurrency(it.price * it.quantity)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-sm font-bold tabular-nums">{formatCurrency(order.grandTotal ?? order.totalAmount)}</span>
-                          <button
-                            type="button"
-                            onClick={() => viewOrder(order.id, order.trackingToken)}
-                            className="pressable text-[13px] font-semibold text-brand-700 px-2 py-2 min-h-[40px]"
-                          >
-                            View Order
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
               )}
             </section>
 
