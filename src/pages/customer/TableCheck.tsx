@@ -5,6 +5,7 @@ import { useRestaurant } from "../../hooks/useRestaurant";
 import { useTableCheck } from "../../hooks/useTableCheck";
 import { getOrCreateSessionId } from "../../utils/session";
 import { getOrderItems } from "../../services/orderService";
+import { getGuestDb } from "../../lib/firebase";
 import {
   formatReservationExpiry,
   reserveTableAtomic,
@@ -37,7 +38,10 @@ export default function CustomerTableCheck() {
   const { restaurantId = "" } = useParams();
   const navigate = useNavigate();
   const { restaurant, loading: rLoading } = useRestaurant(restaurantId);
-  const { models, counts, loading: tLoading, refresh, sessionId } = useTableCheck(restaurantId);
+  const { models, counts, loading: tLoading, refresh, sessionId } = useTableCheck(
+    restaurantId,
+    { source: "guest" }
+  );
   const [browsing, setBrowsing] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [confirmTable, setConfirmTable] = useState<Table | null>(null);
@@ -63,14 +67,15 @@ export default function CustomerTableCheck() {
   }, [models, sessionId]);
 
   const ownOrder = ownModel?.order ?? null;
+  const ownOrderId = ownOrder?.id ?? null;
 
   useEffect(() => {
-    if (!restaurantId || !ownOrder) {
+    if (!restaurantId || !ownOrderId) {
       setOwnItems([]);
       return;
     }
     let cancelled = false;
-    getOrderItems(restaurantId, ownOrder.id)
+    getOrderItems(restaurantId, ownOrderId, getGuestDb())
       .then((items) => {
         if (!cancelled) setOwnItems(items);
       })
@@ -80,7 +85,7 @@ export default function CustomerTableCheck() {
     return () => {
       cancelled = true;
     };
-  }, [restaurantId, ownOrder?.id]);
+  }, [restaurantId, ownOrderId]);
 
   const available = useMemo(() => models.filter((m) => m.status === "AVAILABLE" && m.table.isActive && m.table.isAccessAvailable !== false), [models]);
   const reserved = useMemo(() => models.filter((m) => m.status === "RESERVED" && !m.ownReservation), [models]);
@@ -366,18 +371,54 @@ export default function CustomerTableCheck() {
                 <div className="mt-5">
                   <h3 className="text-xs font-bold tracking-wide uppercase text-ink-500">Occupied ({occupied.length})</h3>
                   <ul className="mt-2 space-y-2.5" aria-live="polite">
-                    {occupied.map((m) => (
-                      <li key={m.table.id} className="bg-surface-50 border border-surface-200 rounded-2xl px-4 py-3">
-                        <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
-                        <span className="flex items-center gap-1.5 text-xs text-ink-500 mt-1">
-                          <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                          Occupied
-                          {m.wait && (m.wait.label === "approx" || m.wait.label === "payment")
-                            ? ` • ${formatWaitLabel(m.wait, LANG)}`
-                            : ""}
-                        </span>
-                      </li>
-                    ))}
+                    {occupied.map((m) => {
+                      const wait = m.wait;
+                      const hasRange =
+                        wait?.label === "approx" &&
+                        wait.remainingMinMinutes != null &&
+                        wait.remainingMaxMinutes != null;
+                      const availability =
+                        hasRange && wait
+                          ? wait.remainingMinMinutes === wait.remainingMaxMinutes
+                            ? `~${wait.remainingMinMinutes} min`
+                            : `~${wait.remainingMinMinutes}–${wait.remainingMaxMinutes} min`
+                          : wait && wait.label === "payment"
+                            ? formatWaitLabel(wait, LANG)
+                            : null;
+                      return (
+                        <li key={m.table.id} className="bg-surface-50 border border-surface-200 rounded-2xl px-4 py-3">
+                          <span className="block font-bold text-ink-900">Table {m.table.tableNumber}</span>
+                          <span className="flex items-center gap-1.5 text-xs text-ink-500 mt-1">
+                            <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                            Occupied
+                          </span>
+                          {availability && (
+                            <div className="mt-1.5 space-y-0.5 text-xs">
+                              <p className="text-ink-700">
+                                <span className="font-semibold text-ink-900">Estimated availability: </span>
+                                {availability}
+                              </p>
+                              {hasRange && wait && wait.preparationMaxMinutes > 0 && (
+                                <p className="text-ink-500">
+                                  Food preparation estimate:{" "}
+                                  {Math.ceil(wait.preparationMinMinutes) === Math.ceil(wait.preparationMaxMinutes)
+                                    ? `${Math.ceil(wait.preparationMinMinutes)} min`
+                                    : `${Math.ceil(wait.preparationMinMinutes)}–${Math.ceil(wait.preparationMaxMinutes)} min`}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                          {!availability && (
+                            <p className="mt-1.5 text-xs text-ink-500">
+                              Estimated availability: not available right now.
+                            </p>
+                          )}
+                          <p className="text-[11px] text-ink-400 mt-1.5">
+                            Unavailable until the current order is completed and the table is released.
+                          </p>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}

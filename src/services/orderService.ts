@@ -4,6 +4,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -15,6 +16,7 @@ import {
   Timestamp,
   writeBatch,
   runTransaction,
+  type Firestore,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { app, db } from "../lib/firebase";
@@ -35,8 +37,8 @@ function isLiveClaimOrder(data: {
 export const TABLE_OCCUPIED_ERROR =
   "TABLE_OCCUPIED: This table already has an active order. Please wait until the current order is completed and payment is confirmed.";
 
-function orderCol(restaurantId: string) {
-  return collection(db, "restaurants", restaurantId, "orders");
+function orderCol(restaurantId: string, database: Firestore = db) {
+  return collection(database, "restaurants", restaurantId, "orders");
 }
 
 const TIMESTAMP_FIELDS = [
@@ -400,10 +402,11 @@ export async function getOrder(
 
 export async function getOrderItems(
   restaurantId: string,
-  orderId: string
+  orderId: string,
+  database: Firestore = db
 ): Promise<OrderItem[]> {
   const snap = await getDocs(
-    collection(orderCol(restaurantId), orderId, "items")
+    collection(orderCol(restaurantId, database), orderId, "items")
   );
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<OrderItem, "id">) }));
 }
@@ -491,6 +494,40 @@ export async function releaseTableClaim(
     currentOrderId: deleteField(),
     updatedAt: serverTimestamp(),
   });
+  // The pre-order selection hold was consumed by this order. Remove it so a
+  // paid/cancelled table cannot momentarily reappear as RESERVED until TTL.
+  // Only delete a hold that predates the order, so a new customer's fresh
+  // reservation made right after release is never removed. Best-effort: the
+  // rules only allow the owner to delete reservations.
+  try {
+    const [reservationSnap, orderSnap] = await Promise.all([
+      getDoc(doc(db, "restaurants", restaurantId, "tableReservations", tableId)),
+      getDoc(doc(orderCol(restaurantId), orderId)),
+    ]);
+    const reservationCreated = reservationSnap.data()?.createdAt;
+    const orderCreated = orderSnap.data()?.createdAt as
+      | { toMillis?: () => number }
+      | number
+      | undefined;
+    const orderCreatedMs =
+      typeof orderCreated === "number"
+        ? orderCreated
+        : typeof orderCreated?.toMillis === "function"
+          ? orderCreated.toMillis()
+          : null;
+    if (
+      reservationSnap.exists() &&
+      typeof reservationCreated === "number" &&
+      orderCreatedMs != null &&
+      reservationCreated <= orderCreatedMs
+    ) {
+      await deleteDoc(
+        doc(db, "restaurants", restaurantId, "tableReservations", tableId)
+      );
+    }
+  } catch {
+    // Non-owner staff may release the claim but cannot delete the hold.
+  }
   return true;
 }
 
@@ -606,12 +643,17 @@ export async function getTodayOrders(
   return snap.docs.map((d) => ({ id: d.id, ...normalizeOrderData(d.data()) }));
 }
 
-export function subscribeToOrder(  restaurantId: string,
+export function subscribeToOrder(
+  restaurantId: string,
   orderId: string,
-  callback: (order: Order | null) => void
+  callback: (order: Order | null) => void,
+  options?: {
+    database?: Firestore;
+    onError?: (error: Error) => void;
+  }
 ): Unsubscribe {
   return onSnapshot(
-    doc(orderCol(restaurantId), orderId),
+    doc(orderCol(restaurantId, options?.database ?? db), orderId),
     (snap) => {
       if (!snap.exists()) {
         callback(null);
@@ -619,6 +661,9 @@ export function subscribeToOrder(  restaurantId: string,
       }
       callback({ id: snap.id, ...normalizeOrderData(snap.data()) });
     },
-    () => callback(null)
+    (error) => {
+      options?.onError?.(error);
+      callback(null);
+    }
   );
 }

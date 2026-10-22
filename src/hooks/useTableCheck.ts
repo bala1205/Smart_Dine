@@ -10,7 +10,8 @@ import {
   type TableReservation,
 } from "../services/tableCheckService";
 import { estimateTableWait, type WaitEstimate } from "../services/tableWaitTimeService";
-import { getOrderItems } from "../services/orderService";
+import { getOrderItems, subscribeToOrder } from "../services/orderService";
+import { getGuestDb } from "../lib/firebase";
 import type { Order, OrderItem } from "../types/order";
 import type { Table } from "../types/table";
 
@@ -25,14 +26,177 @@ export interface TableCheckViewModel {
   wait: WaitEstimate | null;
 }
 
+interface TableClaimRef {
+  tableId: string;
+  orderId: string;
+}
+
+/**
+ * Guest-safe order resolution.
+ *
+ * Customers are unauthenticated and Firestore rules do NOT allow listing the
+ * orders collection for them (queries are not filters). They CAN read the
+ * public table docs (which carry the `currentOrderId` claim) and then read
+ * that single order + its items via the existing tracking-token rules — the
+ * same secure flow the menu page already uses. Subscribing to those exact
+ * order docs keeps the estimate live as the kitchen updates the status,
+ * without ever listing private orders or weakening the rules.
+ */
+function useClaimedTableOrders(
+  restaurantId: string | null | undefined,
+  tables: Table[],
+  enabled: boolean
+): {
+  ordersByTable: Map<string, Order[]>;
+  loading: boolean;
+  claimErrors: Set<string>;
+} {
+  // Key the subscriptions on the claim ids only. Table snapshots also change
+  // when unrelated fields update; without this, every snapshot would tear
+  // down and re-create each order subscription (visible estimate flicker).
+  const claimsKey = useMemo(() => {
+    if (!enabled || !restaurantId) return "";
+    return tables
+      .filter(
+        (t) =>
+          typeof t.currentOrderId === "string" && t.currentOrderId.length > 0
+      )
+      .map((t) => `${t.id}:${t.currentOrderId as string}`)
+      .sort()
+      .join("|");
+  }, [enabled, restaurantId, tables]);
+
+  const claims = useMemo<TableClaimRef[]>(() => {
+    if (!claimsKey) return [];
+    return claimsKey.split("|").map((entry) => {
+      const separator = entry.indexOf(":");
+      return {
+        tableId: entry.slice(0, separator),
+        orderId: entry.slice(separator + 1),
+      };
+    });
+  }, [claimsKey]);
+
+  const [ordersByTable, setOrdersByTable] = useState<Map<string, Order[]>>(new Map());
+  const [settled, setSettled] = useState("");
+  const [failed, setFailed] = useState("");
+
+  useEffect(() => {
+    if (!enabled || !restaurantId || claims.length === 0) {
+      setOrdersByTable(new Map());
+      setSettled("");
+      setFailed("");
+      return;
+    }
+    let cancelled = false;
+    const map = new Map<string, Order[]>();
+    const done = new Set<string>();
+    const failedTables = new Set<string>();
+    // Guest reads must run unauthenticated even if this browser has a staff
+    // session (rules only allow tracking-token reads for request.auth == null).
+    const database = getGuestDb();
+    setOrdersByTable(new Map());
+    setSettled("");
+    setFailed("");
+
+    const publish = () => {
+      setOrdersByTable(new Map(map));
+      setSettled(Array.from(done).join("|"));
+      setFailed(Array.from(failedTables).join("|"));
+    };
+
+    const unsubs = claims.map(({ tableId, orderId }) => {
+      const key = `${tableId}:${orderId}`;
+      return subscribeToOrder(
+        restaurantId,
+        orderId,
+        (order) => {
+          if (cancelled) return;
+          failedTables.delete(tableId);
+          if (order) map.set(tableId, [order]);
+          else map.delete(tableId);
+          done.add(key);
+          publish();
+        },
+        {
+          database,
+          onError: () => {
+            if (cancelled) return;
+            // The table points at an order we cannot verify. Never fall back
+            // to AVAILABLE/RESERVED for that table — surface OCCUPIED instead.
+            failedTables.add(tableId);
+            map.delete(tableId);
+            done.add(key);
+            publish();
+          },
+        }
+      );
+    });
+    return () => {
+      cancelled = true;
+      for (const unsub of unsubs) unsub();
+    };
+  }, [enabled, restaurantId, claims]);
+
+  // Drop claims that no longer exist on the table or no longer match the
+  // order id, so a released table never keeps a stale estimate.
+  const visible = useMemo(() => {
+    if (!enabled) return new Map<string, Order[]>();
+    const claimOrder = new Map(claims.map((c) => [c.tableId, c.orderId]));
+    const out = new Map<string, Order[]>();
+    for (const [tableId, list] of ordersByTable) {
+      const orderId = claimOrder.get(tableId);
+      if (!orderId) continue;
+      const match = list.find((o) => o.id === orderId);
+      if (match) out.set(tableId, [match]);
+    }
+    return out;
+  }, [enabled, claims, ordersByTable]);
+
+  const settledSet = useMemo(
+    () => new Set(settled ? settled.split("|") : []),
+    [settled]
+  );
+  const loading =
+    enabled &&
+    claims.some(({ tableId, orderId }) => !settledSet.has(`${tableId}:${orderId}`));
+
+  const claimErrors = useMemo(
+    () => new Set(failed ? failed.split("|") : []),
+    [failed]
+  );
+
+  return { ordersByTable: visible, loading, claimErrors };
+}
+
+export type TableCheckDataSource = "staff" | "guest";
+
+export interface UseTableCheckOptions {
+  /**
+   * "staff" (default) reads the restaurant order feed (owner/kitchen/waiter).
+   * "guest" reads only each table's public currentOrderId claim — the secure
+   * customer path that works under the deployed Firestore rules.
+   */
+  source?: TableCheckDataSource;
+}
+
 /**
  * Live Table Check view models: tables + orders + reservations + menu
  * (for real preparationTime lookups). Order-derived states mirror
  * useTableOccupancy exactly so owner Tables and Table Check always agree.
  */
-export function useTableCheck(restaurantId?: string | null) {
+export function useTableCheck(
+  restaurantId?: string | null,
+  options?: UseTableCheckOptions
+) {
+  const source = options?.source ?? "staff";
+  const isGuest = source === "guest";
   const { tables, loading: tablesLoading } = useTables(restaurantId);
-  const { orders, loading: ordersLoading } = useRealtimeOrders(restaurantId);
+  // Guests cannot list orders; keep the staff feed disabled for them.
+  const { orders, loading: staffOrdersLoading } = useRealtimeOrders(
+    isGuest ? null : restaurantId
+  );
+  const guest = useClaimedTableOrders(restaurantId, tables, isGuest);
   const { items: menuItems, categories } = useMenu(restaurantId);
   const [reservations, setReservations] = useState<Map<string, TableReservation>>(new Map());
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -53,7 +217,7 @@ export function useTableCheck(restaurantId?: string | null) {
     return () => unsub();
   }, [restaurantId, refreshNonce]);
 
-  const ordersByTable = useMemo(() => {
+  const staffOrdersByTable = useMemo(() => {
     const map = new Map<string, Order[]>();
     for (const o of orders) {
       const list = map.get(o.tableId) || [];
@@ -62,6 +226,9 @@ export function useTableCheck(restaurantId?: string | null) {
     }
     return map;
   }, [orders]);
+
+  const ordersByTable = isGuest ? guest.ordersByTable : staffOrdersByTable;
+  const ordersLoading = isGuest ? guest.loading : staffOrdersLoading;
 
   // Fetch items for live orders only (wait-time prep inputs).
   useEffect(() => {
@@ -78,10 +245,11 @@ export function useTableCheck(restaurantId?: string | null) {
     let cancelled = false;
     (async () => {
       const next = new Map<string, OrderItem[]>();
+      const database = isGuest ? getGuestDb() : undefined;
       await Promise.all(
         [...liveIds].map(async (id) => {
           try {
-            next.set(id, await getOrderItems(restaurantId, id));
+            next.set(id, await getOrderItems(restaurantId, id, database));
           } catch {
             next.set(id, []);
           }
@@ -92,7 +260,7 @@ export function useTableCheck(restaurantId?: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [restaurantId, ordersByTable]);
+  }, [restaurantId, ordersByTable, isGuest]);
 
   const menuById = useMemo(() => new Map(menuItems.map((mi) => [mi.id, mi])), [menuItems]);
   const catById = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
@@ -102,13 +270,34 @@ export function useTableCheck(restaurantId?: string | null) {
     const sorted = [...tables].sort((a, b) => a.tableNumber - b.tableNumber);
     return sorted.map((table) => {
       const tableOrders = ordersByTable.get(table.id) || [];
-      const resolved = resolveTableCheckStatus({
+      const base = resolveTableCheckStatus({
         table,
         ordersForTable: tableOrders,
         reservation: reservations.get(table.id) ?? null,
         sessionId,
         now,
       });
+      // If the table claims an order we could not read — or carries an
+      // occupancy session without a usable order id (legacy/partial claim) —
+      // never advertise it as available or merely reserved. Order creation
+      // fails closed on that same state, so OCCUPIED is the honest status.
+      // Show it without fabricating a wait estimate.
+      const hasUnreadableClaim =
+        guest.claimErrors.has(table.id) ||
+        (!table.currentOrderId &&
+          typeof table.occupiedBy === "string" &&
+          table.occupiedBy.length > 0);
+      const claimUnverified = isGuest && hasUnreadableClaim;
+      const resolved =
+        claimUnverified &&
+        (base.status === "AVAILABLE" || base.status === "RESERVED")
+          ? {
+              status: "OCCUPIED" as const,
+              order: null,
+              reservation: null,
+              ownReservation: false,
+            }
+          : base;
       let wait: WaitEstimate | null = null;
       if ((resolved.status === "OCCUPIED" || resolved.status === "PAYMENT_PENDING") && resolved.order) {
         const order = resolved.order;
@@ -148,7 +337,7 @@ export function useTableCheck(restaurantId?: string | null) {
         wait,
       };
     });
-  }, [tables, ordersByTable, reservations, sessionId, itemsByOrder, menuById, catById, nowTick]);
+  }, [tables, ordersByTable, reservations, sessionId, itemsByOrder, menuById, catById, nowTick, isGuest, guest.claimErrors]);
 
   const counts = useMemo(() => {
     let available = 0;
